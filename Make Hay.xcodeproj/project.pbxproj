@@ -401,6 +401,7 @@
 				DEVELOPMENT_TEAM = 6VQ42S7UGS;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Make Hay needs access to your step count to track your daily activity and help you stay motivated.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -434,6 +435,7 @@
 				DEVELOPMENT_TEAM = 6VQ42S7UGS;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Make Hay needs access to your step count to track your daily activity and help you stay motivated.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
