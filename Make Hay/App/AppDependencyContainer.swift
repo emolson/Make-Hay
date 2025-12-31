@@ -21,10 +21,10 @@ final class AppDependencyContainer: ObservableObject, Sendable {
     /// Creates a new dependency container with the provided services.
     /// - Parameters:
     ///   - healthService: The service to use for health data. Defaults to real service if available.
-    ///   - blockerService: The service to use for app blocking. Defaults to mock for now.
+    ///   - blockerService: The service to use for app blocking. Defaults to real BlockerService.
     init(
         healthService: (any HealthServiceProtocol)? = nil,
-        blockerService: any BlockerServiceProtocol = MockBlockerService()
+        blockerService: (any BlockerServiceProtocol)? = nil
     ) {
         // Use provided health service, or try to create real one, falling back to mock
         if let healthService = healthService {
@@ -34,7 +34,13 @@ final class AppDependencyContainer: ObservableObject, Sendable {
         } else {
             self.healthService = MockHealthService()
         }
-        self.blockerService = blockerService
+        
+        // Use provided blocker service, or create real BlockerService
+        if let blockerService = blockerService {
+            self.blockerService = blockerService
+        } else {
+            self.blockerService = BlockerService()
+        }
     }
     
     /// Creates a container with mock services configured for previews.

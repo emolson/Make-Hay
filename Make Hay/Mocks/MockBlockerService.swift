@@ -5,6 +5,7 @@
 //  Created by Ethan Olson on 12/31/25.
 //
 
+import FamilyControls
 import Foundation
 
 /// Mock implementation of BlockerServiceProtocol for previews and unit tests.
@@ -15,6 +16,9 @@ actor MockBlockerService: BlockerServiceProtocol {
     
     /// When `true`, all methods will throw their respective errors.
     var shouldThrowError: Bool = false
+    
+    /// The stored app selection (simulates persistence).
+    var selection: FamilyActivitySelection = FamilyActivitySelection()
     
     /// Simulates requesting Family Controls authorization.
     /// - Throws: `BlockerServiceError.authorizationFailed` if `shouldThrowError` is `true`.
@@ -32,6 +36,24 @@ actor MockBlockerService: BlockerServiceProtocol {
             throw BlockerServiceError.notAuthorized
         }
         isBlocking = shouldBlock
+    }
+    
+    /// Simulates storing the user's app selection.
+    /// - Parameter selection: The `FamilyActivitySelection` to store.
+    /// - Throws: `BlockerServiceError.shieldUpdateFailed` if `shouldThrowError` is `true`.
+    func setSelection(_ selection: FamilyActivitySelection) async throws {
+        if shouldThrowError {
+            throw BlockerServiceError.shieldUpdateFailed(
+                underlying: NSError(domain: "MockError", code: 0)
+            )
+        }
+        self.selection = selection
+    }
+    
+    /// Returns the stored app selection.
+    /// - Returns: The current `FamilyActivitySelection`.
+    func getSelection() async -> FamilyActivitySelection {
+        return selection
     }
     
     /// Returns the current blocking state. Useful for test assertions.

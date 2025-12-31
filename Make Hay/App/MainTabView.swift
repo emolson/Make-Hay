@@ -25,7 +25,7 @@ struct MainTabView: View {
             }
             .accessibilityIdentifier("dashboardTab")
             
-            SettingsView()
+            SettingsView(blockerService: container.blockerService)
                 .tabItem {
                     Label(
                         String(localized: "Settings"),

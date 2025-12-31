@@ -14,6 +14,11 @@ import SwiftUI
 /// a dedicated persistence layer for simple key-value data.
 struct SettingsView: View {
     
+    // MARK: - Dependencies
+    
+    /// The blocker service for app selection. Injected for testability.
+    let blockerService: any BlockerServiceProtocol
+    
     // MARK: - State
     
     /// The user's daily step goal, persisted to UserDefaults.
@@ -82,14 +87,11 @@ struct SettingsView: View {
     
     private var blockedAppsSection: some View {
         Section {
-            HStack {
-                Image(systemName: "app.badge")
-                    .foregroundStyle(.tint)
-                Text(String(localized: "App selection will appear here."))
-                    .foregroundStyle(.secondary)
-            }
+            AppPickerView(blockerService: blockerService)
         } header: {
             Text(String(localized: "Blocked Apps"))
+        } footer: {
+            Text(String(localized: "Select the apps that will be blocked until you reach your daily step goal."))
         }
     }
     
@@ -104,5 +106,5 @@ struct SettingsView: View {
 // MARK: - Preview
 
 #Preview {
-    SettingsView()
+    SettingsView(blockerService: MockBlockerService())
 }
