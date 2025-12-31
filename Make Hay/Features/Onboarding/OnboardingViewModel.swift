@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Combine
 
 /// Represents the steps in the onboarding flow.
 enum OnboardingStep: Int, CaseIterable {
@@ -133,3 +134,4 @@ final class OnboardingViewModel: ObservableObject {
         errorMessage = nil
     }
 }
+
