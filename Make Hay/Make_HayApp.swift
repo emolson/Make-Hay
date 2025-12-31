@@ -21,8 +21,12 @@ struct Make_HayApp: App {
                 MainTabView()
                     .environmentObject(container)
             } else {
-                OnboardingView(hasCompletedOnboarding: $hasCompletedOnboarding)
-                    .environmentObject(container)
+                OnboardingView(
+                    hasCompletedOnboarding: $hasCompletedOnboarding,
+                    healthService: container.healthService,
+                    blockerService: container.blockerService
+                )
+                .environmentObject(container)
             }
         }
     }
