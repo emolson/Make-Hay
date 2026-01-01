@@ -16,6 +16,9 @@ struct SettingsView: View {
     
     // MARK: - Dependencies
     
+    /// The health service for checking authorization status. Injected for testability.
+    let healthService: any HealthServiceProtocol
+    
     /// The blocker service for app selection. Injected for testability.
     let blockerService: any BlockerServiceProtocol
     
@@ -40,6 +43,12 @@ struct SettingsView: View {
     /// by cancelling any in-flight request before starting a new one.
     @State private var shieldUpdateTask: Task<Void, Never>?
     
+    /// Tracks the current health authorization status for display.
+    @State private var healthAuthStatus: HealthAuthorizationStatus = .notDetermined
+    
+    /// Tracks the current Screen Time authorization status for display.
+    @State private var screenTimeAuthorized: Bool = false
+    
     /// The minimum step goal allowed.
     private let minimumGoal: Int = 1_000
     
@@ -54,11 +63,18 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
+                permissionsSection
                 goalSection
                 blockedAppsSection
                 debugSection
             }
             .navigationTitle(String(localized: "Settings"))
+            .task {
+                await refreshPermissionStatus()
+            }
+            .refreshable {
+                await refreshPermissionStatus()
+            }
             .alert(
                 String(localized: "Blocking Error"),
                 isPresented: $showingErrorAlert
@@ -73,6 +89,103 @@ struct SettingsView: View {
     }
     
     // MARK: - Sections
+    
+    /// Permissions section showing current authorization status for Health and Screen Time.
+    ///
+    /// **Why this section?** Users need visibility into permission states to understand
+    /// why blocking might not work. This also provides a way to re-request permissions
+    /// or navigate to Settings to fix issues.
+    @ViewBuilder
+    private var permissionsSection: some View {
+        Section {
+            // Health Permission Row
+            HStack {
+                Image(systemName: healthStatusIcon)
+                    .foregroundStyle(healthStatusColor)
+                    .font(.title2)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(String(localized: "Apple Health"))
+                        .font(.headline)
+                    
+                    Text(healthStatusText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                
+                Spacer()
+                
+                if healthAuthStatus != .authorized {
+                    Button(String(localized: "Request")) {
+                        Task {
+                            do {
+                                try await healthService.requestAuthorization()
+                                await refreshPermissionStatus()
+                            } catch {
+                                errorMessage = error.localizedDescription
+                                showingErrorAlert = true
+                            }
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("requestHealthButton")
+                }
+            }
+            .accessibilityIdentifier("healthPermissionRow")
+            
+            // Screen Time Permission Row
+            HStack {
+                Image(systemName: screenTimeStatusIcon)
+                    .foregroundStyle(screenTimeStatusColor)
+                    .font(.title2)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(String(localized: "Screen Time"))
+                        .font(.headline)
+                    
+                    Text(screenTimeStatusText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                
+                Spacer()
+                
+                if !screenTimeAuthorized {
+                    Button(String(localized: "Request")) {
+                        Task {
+                            do {
+                                try await blockerService.requestAuthorization()
+                                await refreshPermissionStatus()
+                            } catch {
+                                errorMessage = error.localizedDescription
+                                showingErrorAlert = true
+                            }
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("requestScreenTimeButton")
+                }
+            }
+            .accessibilityIdentifier("screenTimePermissionRow")
+            
+            // Open Settings Button
+            Button {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            } label: {
+                HStack {
+                    Image(systemName: "gear")
+                    Text(String(localized: "Open App Settings"))
+                }
+            }
+            .accessibilityIdentifier("openSettingsButton")
+        } header: {
+            Text(String(localized: "Permissions"))
+        } footer: {
+            Text(String(localized: "Both permissions are required for the app to function correctly. Pull to refresh status."))
+        }
+    }
     
     private var goalSection: some View {
         Section {
@@ -182,10 +295,75 @@ struct SettingsView: View {
     private var formattedGoal: String {
         dailyStepGoal.formatted(.number)
     }
+    
+    // MARK: - Health Permission Display
+    
+    private var healthStatusIcon: String {
+        switch healthAuthStatus {
+        case .authorized:
+            return "checkmark.circle.fill"
+        case .denied:
+            return "xmark.circle.fill"
+        case .notDetermined:
+            return "questionmark.circle.fill"
+        }
+    }
+    
+    private var healthStatusColor: Color {
+        switch healthAuthStatus {
+        case .authorized:
+            return .green
+        case .denied:
+            return .red
+        case .notDetermined:
+            return .orange
+        }
+    }
+    
+    private var healthStatusText: String {
+        switch healthAuthStatus {
+        case .authorized:
+            return String(localized: "Access granted to read step data")
+        case .denied:
+            return String(localized: "Access denied - check Settings")
+        case .notDetermined:
+            return String(localized: "Permission not yet requested")
+        }
+    }
+    
+    // MARK: - Screen Time Permission Display
+    
+    private var screenTimeStatusIcon: String {
+        screenTimeAuthorized ? "checkmark.circle.fill" : "xmark.circle.fill"
+    }
+    
+    private var screenTimeStatusColor: Color {
+        screenTimeAuthorized ? .green : .red
+    }
+    
+    private var screenTimeStatusText: String {
+        screenTimeAuthorized
+            ? String(localized: "Family Controls authorized")
+            : String(localized: "Not authorized - app blocking unavailable")
+    }
+    
+    // MARK: - Methods
+    
+    /// Refreshes the current permission status from both services.
+    ///
+    /// **Why this is async?** We need to access actor-isolated properties,
+    /// which requires awaiting across actor boundaries.
+    private func refreshPermissionStatus() async {
+        healthAuthStatus = await healthService.authorizationStatus
+        screenTimeAuthorized = await blockerService.isAuthorized
+    }
 }
 
 // MARK: - Preview
 
 #Preview {
-    SettingsView(blockerService: MockBlockerService())
+    SettingsView(
+        healthService: MockHealthService(),
+        blockerService: MockBlockerService()
+    )
 }

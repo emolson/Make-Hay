@@ -14,11 +14,19 @@ actor MockBlockerService: BlockerServiceProtocol {
     /// Tracks whether blocking is currently active.
     var isBlocking: Bool = false
     
+    /// Mock authorization state.
+    var mockIsAuthorized: Bool = true
+    
     /// When `true`, all methods will throw their respective errors.
     var shouldThrowError: Bool = false
     
     /// The stored app selection (simulates persistence).
     var selection: FamilyActivitySelection = FamilyActivitySelection()
+    
+    /// Returns the mock authorization status.
+    var isAuthorized: Bool {
+        mockIsAuthorized
+    }
     
     /// Simulates requesting Family Controls authorization.
     /// - Throws: `BlockerServiceError.authorizationFailed` if `shouldThrowError` is `true`.

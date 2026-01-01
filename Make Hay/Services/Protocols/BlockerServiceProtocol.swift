@@ -11,6 +11,10 @@ import Foundation
 /// Protocol defining the interface for app blocking operations using FamilyControls.
 /// Conforms to Actor for thread-safe access to shield management.
 protocol BlockerServiceProtocol: Actor {
+    /// Returns whether Family Controls is currently authorized.
+    /// - Returns: `true` if authorized, `false` otherwise.
+    var isAuthorized: Bool { get }
+    
     /// Requests authorization for Family Controls.
     /// - Throws: `BlockerServiceError` if authorization fails.
     func requestAuthorization() async throws

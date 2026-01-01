@@ -7,6 +7,22 @@
 
 import Foundation
 
+/// Represents the authorization status for HealthKit access.
+///
+/// **Why a custom enum?** HealthKit's native `HKAuthorizationStatus` has privacy restrictions
+/// that don't clearly indicate if the user approved access. We use a simplified status
+/// that reflects the practical authorization state for our app's needs.
+enum HealthAuthorizationStatus: Sendable {
+    /// Authorization has not been requested yet.
+    case notDetermined
+    
+    /// The user authorized access to health data.
+    case authorized
+    
+    /// The user denied access or authorization is not possible.
+    case denied
+}
+
 /// Errors that can occur during HealthKit operations.
 enum HealthServiceError: Error, Sendable {
     /// HealthKit is not available on this device (e.g., iPad without Health app).

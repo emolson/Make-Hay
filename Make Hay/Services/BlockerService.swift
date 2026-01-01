@@ -33,6 +33,17 @@ actor BlockerService: BlockerServiceProtocol {
         return documentsDirectory.appendingPathComponent("FamilyActivitySelection.plist")
     }
     
+    // MARK: - BlockerServiceProtocol
+    
+    /// Returns whether Family Controls is currently authorized.
+    ///
+    /// **Why use AuthorizationCenter.shared.authorizationStatus?**
+    /// This is Apple's API for checking the current state of Family Controls authorization.
+    /// Unlike HealthKit, FamilyControls clearly exposes whether access is approved.
+    var isAuthorized: Bool {
+        AuthorizationCenter.shared.authorizationStatus == .approved
+    }
+    
     // MARK: - Initialization
     
     init() {

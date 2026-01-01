@@ -13,8 +13,16 @@ actor MockHealthService: HealthServiceProtocol {
     /// The number of steps to return from `fetchDailySteps()`.
     var mockSteps: Int = 5_000
     
+    /// Mock authorization status.
+    var mockAuthorizationStatus: HealthAuthorizationStatus = .authorized
+    
     /// When `true`, all methods will throw their respective errors.
     var shouldThrowError: Bool = false
+    
+    /// Returns the mock authorization status.
+    var authorizationStatus: HealthAuthorizationStatus {
+        mockAuthorizationStatus
+    }
     
     /// Simulates requesting HealthKit authorization.
     /// - Throws: `HealthServiceError.authorizationDenied` if `shouldThrowError` is `true`.
