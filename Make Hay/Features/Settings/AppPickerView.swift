@@ -161,7 +161,7 @@ struct AppPickerView: View {
         selection = await blockerService.getSelection()
     }
     
-    /// Saves the selection to the blocker service.
+    /// Saves the selection to the blocker service and applies shields immediately.
     /// - Parameter newSelection: The updated `FamilyActivitySelection` to persist.
     private func saveSelection(_ newSelection: FamilyActivitySelection) async {
         isSaving = true
@@ -169,6 +169,13 @@ struct AppPickerView: View {
         
         do {
             try await blockerService.setSelection(newSelection)
+            
+            // Apply or remove shields immediately based on whether apps are selected.
+            // **Why apply shields here?** The user expects changes to take effect right away.
+            // If we only persist the selection without updating shields, the blocking
+            // state won't change until some other code path calls updateShields.
+            let hasAppsSelected = !newSelection.applicationTokens.isEmpty || !newSelection.categoryTokens.isEmpty
+            try await blockerService.updateShields(shouldBlock: hasAppsSelected)
             
             // Provide haptic feedback on successful save
             await MainActor.run {
