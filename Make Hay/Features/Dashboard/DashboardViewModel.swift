@@ -28,6 +28,11 @@ final class DashboardViewModel {
     /// Indicates whether a data fetch is in progress.
     var isLoading: Bool = false
     
+    /// Indicates whether apps are currently being blocked.
+    /// **Why expose this?** Provides transparency to users about blocking state,
+    /// enabling UI feedback when apps are restricted.
+    var isBlocking: Bool = false
+    
     /// Error message to display if an operation fails.
     var errorMessage: String?
     
@@ -51,14 +56,18 @@ final class DashboardViewModel {
     // MARK: - Dependencies
     
     private let healthService: any HealthServiceProtocol
+    private let blockerService: any BlockerServiceProtocol
     
     // MARK: - Initialization
     
-    /// Creates a new DashboardViewModel with the specified health service.
-    /// - Parameter healthService: The service to use for fetching health data.
-    ///   Injected as a protocol to enable testing with mocks.
-    init(healthService: any HealthServiceProtocol) {
+    /// Creates a new DashboardViewModel with the specified services.
+    /// - Parameters:
+    ///   - healthService: The service to use for fetching health data.
+    ///   - blockerService: The service to use for managing app blocking.
+    ///   Both are injected as protocols to enable testing with mocks.
+    init(healthService: any HealthServiceProtocol, blockerService: any BlockerServiceProtocol) {
         self.healthService = healthService
+        self.blockerService = blockerService
         refreshGoalFromStorage()
     }
     
@@ -83,6 +92,8 @@ final class DashboardViewModel {
         
         do {
             currentSteps = try await healthService.fetchDailySteps()
+            // Check and update blocking status after loading steps
+            await checkGoalStatus()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -99,6 +110,8 @@ final class DashboardViewModel {
         do {
             try await healthService.requestAuthorization()
             currentSteps = try await healthService.fetchDailySteps()
+            // Check and update blocking status after loading steps
+            await checkGoalStatus()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -110,6 +123,29 @@ final class DashboardViewModel {
     }
     
     // MARK: - Private Methods
+    
+    /// Checks the user's progress toward their goal and updates app blocking accordingly.
+    /// **Why this is the "gate"?** This is where health achievement (the "key") controls
+    /// app access (the "lock"). If steps < goal, apps are blocked. If goal is met, access is granted.
+    /// **Why try? instead of do-catch?** Blocking failures shouldn't prevent the UI from working.
+    /// If the blocker service fails, we silently continue to display health data.
+    /// - Returns: True if blocking state changed from blocked to unblocked (goal achieved)
+    @discardableResult
+    private func checkGoalStatus() async -> Bool {
+        let shouldBlock = currentSteps < dailyStepGoal
+        let wasBlocking = isBlocking
+        
+        if shouldBlock {
+            try? await blockerService.updateShields(shouldBlock: true)
+            isBlocking = true
+        } else {
+            try? await blockerService.updateShields(shouldBlock: false)
+            isBlocking = false
+        }
+        
+        // Return true if we transitioned from blocked to unblocked (goal achieved!)
+        return wasBlocking && !isBlocking
+    }
     
     /// Refreshes the daily step goal from UserDefaults.
     /// **Why read from UserDefaults directly?** The goal is set in SettingsView using
