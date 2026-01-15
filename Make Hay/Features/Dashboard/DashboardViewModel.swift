@@ -63,6 +63,11 @@ final class DashboardViewModel {
     private let healthService: any HealthServiceProtocol
     private let blockerService: any BlockerServiceProtocol
     
+    /// Static ISO8601 formatter for date comparisons.
+    /// **Why static?** DateFormatters are expensive to create. A static instance
+    /// is created once and reused across all instances and calls.
+    private static let dateFormatter = ISO8601DateFormatter()
+    
     // MARK: - Initialization
     
     /// Creates a new DashboardViewModel with the specified services.
@@ -110,6 +115,9 @@ final class DashboardViewModel {
     /// Requests HealthKit authorization and then loads steps.
     /// Use this when the user taps retry after an authorization error.
     func requestAuthorizationAndLoad() async {
+        // Check if it's a new day before loading steps
+        checkForNewDay()
+        
         isLoading = true
         errorMessage = nil
         
@@ -140,7 +148,7 @@ final class DashboardViewModel {
     /// async health fetch will trigger blocking via `checkGoalStatus()`.
     private func checkForNewDay() {
         let today = Calendar.current.startOfDay(for: Date())
-        let todayString = ISO8601DateFormatter().string(from: today)
+        let todayString = Self.dateFormatter.string(from: today)
         
         // If stored date differs from today, it's a new day
         if lastCheckedDate != todayString {

@@ -13,7 +13,7 @@ struct OnboardingView: View {
     @Binding var hasCompletedOnboarding: Bool
     
     /// ViewModel managing onboarding state and permission requests.
-    @StateObject private var viewModel: OnboardingViewModel
+    @State private var viewModel: OnboardingViewModel
     
     /// Creates a new OnboardingView with the specified services.
     /// - Parameters:
@@ -26,7 +26,7 @@ struct OnboardingView: View {
         blockerService: any BlockerServiceProtocol
     ) {
         self._hasCompletedOnboarding = hasCompletedOnboarding
-        self._viewModel = StateObject(wrappedValue: OnboardingViewModel(
+        self._viewModel = State(initialValue: OnboardingViewModel(
             healthService: healthService,
             blockerService: blockerService
         ))

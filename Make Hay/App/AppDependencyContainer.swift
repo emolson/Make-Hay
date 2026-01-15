@@ -11,7 +11,7 @@ import Combine
 /// Dependency Injection container that instantiates and holds references to all services.
 /// Injects protocols, not concrete types, to enable testability and preview support.
 @MainActor
-final class AppDependencyContainer: ObservableObject, Sendable {
+final class AppDependencyContainer: ObservableObject {
     /// The health service for HealthKit operations.
     let healthService: any HealthServiceProtocol
     

@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import Combine
+import SwiftUI
 
 /// Represents the steps in the onboarding flow.
 enum OnboardingStep: Int, CaseIterable {
@@ -18,24 +18,25 @@ enum OnboardingStep: Int, CaseIterable {
 
 /// ViewModel managing the onboarding flow state and permission requests.
 /// Uses @MainActor isolation to ensure all UI state updates happen on the main thread.
+@Observable
 @MainActor
-final class OnboardingViewModel: ObservableObject {
-    // MARK: - Published Properties
+final class OnboardingViewModel {
+    // MARK: - State Properties
     
     /// The current step in the onboarding flow.
-    @Published var currentStep: OnboardingStep = .welcome
+    var currentStep: OnboardingStep = .welcome
     
     /// Whether HealthKit permission has been granted.
-    @Published var healthPermissionGranted: Bool = false
+    var healthPermissionGranted: Bool = false
     
     /// Whether Screen Time permission has been granted.
-    @Published var screenTimePermissionGranted: Bool = false
+    var screenTimePermissionGranted: Bool = false
     
     /// Whether a permission request is currently in progress.
-    @Published var isRequestingPermission: Bool = false
+    var isRequestingPermission: Bool = false
     
     /// Error message to display if a permission request fails.
-    @Published var errorMessage: String?
+    var errorMessage: String?
     
     // MARK: - Dependencies
     
