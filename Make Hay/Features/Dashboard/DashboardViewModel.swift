@@ -41,6 +41,11 @@ final class DashboardViewModel {
         errorMessage != nil
     }
     
+    /// The last date the app checked for steps, stored as ISO8601 string.
+    /// Used to detect when a new day has started and reset blocking accordingly.
+    @ObservationIgnored
+    @AppStorage("lastCheckedDate") private var lastCheckedDate: String = ""
+    
     /// Calculates the user's progress toward their daily step goal.
     /// Returns a value between 0.0 and 1.0 (capped at 1.0 even if goal exceeded).
     var progress: Double {
@@ -85,6 +90,9 @@ final class DashboardViewModel {
     /// Updates `currentSteps`, `isLoading`, and `errorMessage` accordingly.
     /// Note: This assumes authorization has already been granted.
     func loadSteps() async {
+        // Check if it's a new day before loading steps
+        checkForNewDay()
+        
         isLoading = true
         errorMessage = nil
         
@@ -123,6 +131,26 @@ final class DashboardViewModel {
     }
     
     // MARK: - Private Methods
+    
+    /// Checks if a new day has started and resets the blocking state if necessary.
+    /// **Why this matters?** At midnight, the step count resets to 0, but the app might
+    /// still have apps unblocked from yesterday. This function detects the date change
+    /// and re-engages the block to ensure users start each day locked until they meet their goal.
+    /// **Design:** Synchronous date comparison with immediate state update. The subsequent
+    /// async health fetch will trigger blocking via `checkGoalStatus()`.
+    private func checkForNewDay() {
+        let today = Calendar.current.startOfDay(for: Date())
+        let todayString = ISO8601DateFormatter().string(from: today)
+        
+        // If stored date differs from today, it's a new day
+        if lastCheckedDate != todayString {
+            lastCheckedDate = todayString
+            // Reset current steps to force a fresh check
+            // The subsequent fetchDailySteps() will get today's actual (likely low) count
+            // and checkGoalStatus() will re-engage blocking if needed
+            currentSteps = 0
+        }
+    }
     
     /// Checks the user's progress toward their goal and updates app blocking accordingly.
     /// **Why this is the "gate"?** This is where health achievement (the "key") controls
