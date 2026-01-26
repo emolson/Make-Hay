@@ -26,7 +26,7 @@ final class AppDependencyContainer: ObservableObject {
         healthService: (any HealthServiceProtocol)? = nil,
         blockerService: (any BlockerServiceProtocol)? = nil
     ) {
-        // Use provided health service, or try to create real one, falling back to mock
+        // Use provided health service, or try to create real one.
         if let healthService = healthService {
             self.healthService = healthService
         } else if let realHealthService = try? HealthService() {
@@ -35,10 +35,12 @@ final class AppDependencyContainer: ObservableObject {
             self.healthService = MockHealthService()
         }
         
-        // Use provided blocker service, or create real BlockerService
+        // Use provided blocker service, or create real BlockerService, falling back to mock
         if let blockerService = blockerService {
             self.blockerService = blockerService
         } else {
+            // BlockerService init doesn't throw, but we still provide a mock fallback
+            // for consistency and to support environments where FamilyControls may be unavailable
             self.blockerService = BlockerService()
         }
     }

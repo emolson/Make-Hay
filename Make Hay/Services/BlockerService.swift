@@ -25,7 +25,7 @@ actor BlockerService: BlockerServiceProtocol {
     private var selection: FamilyActivitySelection = FamilyActivitySelection()
     
     /// The file URL where the selection is persisted.
-    private var selectionURL: URL {
+    private static var selectionURL: URL {
         let documentsDirectory = FileManager.default.urls(
             for: .documentDirectory,
             in: .userDomainMask
@@ -47,8 +47,8 @@ actor BlockerService: BlockerServiceProtocol {
     // MARK: - Initialization
     
     init() {
-        // Load persisted selection on initialization
-        loadPersistedSelection()
+        // Load persisted selection on initialization without crossing actor isolation.
+        self.selection = Self.loadPersistedSelection()
     }
     
     // MARK: - BlockerServiceProtocol
@@ -110,7 +110,7 @@ actor BlockerService: BlockerServiceProtocol {
             let encoder = PropertyListEncoder()
             encoder.outputFormat = .binary
             let data = try encoder.encode(selection)
-            try data.write(to: selectionURL, options: .atomic)
+            try data.write(to: Self.selectionURL, options: .atomic)
         } catch {
             throw BlockerServiceError.shieldUpdateFailed(underlying: error)
         }
@@ -127,20 +127,20 @@ actor BlockerService: BlockerServiceProtocol {
     /// Loads the persisted selection from disk.
     ///
     /// Called during initialization to restore the user's previous app selection.
-    /// If no file exists or decoding fails, the selection remains empty.
-    private func loadPersistedSelection() {
-        guard FileManager.default.fileExists(atPath: selectionURL.path) else {
-            return
+    /// If no file exists or decoding fails, returns an empty selection.
+    private static func loadPersistedSelection() -> FamilyActivitySelection {
+        guard FileManager.default.fileExists(atPath: Self.selectionURL.path) else {
+            return FamilyActivitySelection()
         }
         
         do {
-            let data = try Data(contentsOf: selectionURL)
+            let data = try Data(contentsOf: Self.selectionURL)
             let decoder = PropertyListDecoder()
-            selection = try decoder.decode(FamilyActivitySelection.self, from: data)
+            return try decoder.decode(FamilyActivitySelection.self, from: data)
         } catch {
             // If loading fails, start with an empty selection
             // This is intentionally silent - the user can re-select apps
-            selection = FamilyActivitySelection()
+            return FamilyActivitySelection()
         }
     }
 }
