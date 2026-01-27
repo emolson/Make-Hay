@@ -24,9 +24,11 @@ struct SettingsView: View {
     
     // MARK: - State
     
-    /// The user's daily step goal, persisted to UserDefaults.
-    /// Defaults to 10,000 steps, a commonly recommended daily target.
-    @AppStorage("dailyStepGoal") private var dailyStepGoal: Int = 10_000
+    /// Stored health goal data as JSON.
+    @AppStorage(HealthGoal.storageKey) private var healthGoalData: String = ""
+    
+    /// The user's full goal configuration.
+    @State private var healthGoal: HealthGoal = HealthGoal.load()
     
     /// Debug state for manually forcing app blocking on/off.
     /// Persisted to survive app restarts during testing sessions.
@@ -50,30 +52,52 @@ struct SettingsView: View {
     @State private var screenTimeAuthorized: Bool = false
     
     /// The minimum step goal allowed.
-    private let minimumGoal: Int = 1_000
+    private let minimumStepGoal: Int = 1_000
     
     /// The maximum step goal allowed.
-    private let maximumGoal: Int = 50_000
+    private let maximumStepGoal: Int = 50_000
     
     /// The increment/decrement step size for the stepper.
     private let stepIncrement: Int = 500
+    
+    /// The minimum active energy goal allowed (kcal).
+    private let minimumActiveEnergy: Int = 50
+    
+    /// The maximum active energy goal allowed (kcal).
+    private let maximumActiveEnergy: Int = 2_000
+    
+    /// The increment for active energy (kcal).
+    private let activeEnergyIncrement: Int = 25
+    
+    /// The minimum exercise minutes goal allowed.
+    private let minimumExerciseMinutes: Int = 5
+    
+    /// The maximum exercise minutes goal allowed.
+    private let maximumExerciseMinutes: Int = 180
+    
+    /// The increment for exercise minutes.
+    private let exerciseMinuteIncrement: Int = 5
     
     // MARK: - Body
     
     var body: some View {
         NavigationStack {
             List {
-                permissionsSection
                 goalSection
                 blockedAppsSection
+                permissionsSection
                 debugSection
             }
             .navigationTitle(String(localized: "Settings"))
             .task {
                 await refreshPermissionStatus()
+                loadGoalFromStorage()
             }
             .refreshable {
                 await refreshPermissionStatus()
+            }
+            .onChange(of: healthGoal) { _, newValue in
+                persistGoal(newValue)
             }
             .alert(
                 String(localized: "Blocking Error"),
@@ -190,37 +214,116 @@ struct SettingsView: View {
     private var goalSection: some View {
         Section {
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Image(systemName: "figure.walk")
-                        .foregroundStyle(.tint)
-                        .font(.title2)
-                    
-                    Text(String(localized: "Daily Step Goal"))
-                        .font(.headline)
-                }
-                
-                Text(formattedGoal)
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
-                    .foregroundStyle(.primary)
-                    .contentTransition(.numericText())
-                    .accessibilityIdentifier("currentGoalLabel")
-                
-                Stepper(
-                    value: $dailyStepGoal,
-                    in: minimumGoal...maximumGoal,
-                    step: stepIncrement
+                goalToggleRow(
+                    icon: "figure.walk",
+                    title: String(localized: "Steps"),
+                    subtitle: String(localized: "Track daily steps")
                 ) {
-                    Text(String(localized: "Adjust by \(stepIncrement.formatted())"))
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    Toggle(isOn: $healthGoal.stepGoal.isEnabled) { EmptyView() }
+                        .labelsHidden()
+                        .accessibilityIdentifier("toggleStepsGoal")
                 }
-                .accessibilityIdentifier("stepGoalStepper")
+                
+                if healthGoal.stepGoal.isEnabled {
+                    goalValueDisplay(
+                        value: healthGoal.stepGoal.target.formatted(.number),
+                        unit: String(localized: "steps")
+                    )
+                    
+                    Stepper(
+                        value: $healthGoal.stepGoal.target,
+                        in: minimumStepGoal...maximumStepGoal,
+                        step: stepIncrement
+                    ) {
+                        Text(String(localized: "Adjust by \(stepIncrement.formatted())"))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityIdentifier("stepGoalStepper")
+                }
+                
+                Divider().padding(.vertical, 6)
+                
+                goalToggleRow(
+                    icon: "flame",
+                    title: String(localized: "Active Energy"),
+                    subtitle: String(localized: "Calories burned")
+                ) {
+                    Toggle(isOn: $healthGoal.activeEnergyGoal.isEnabled) { EmptyView() }
+                        .labelsHidden()
+                        .accessibilityIdentifier("toggleActiveEnergyGoal")
+                }
+                
+                if healthGoal.activeEnergyGoal.isEnabled {
+                    goalValueDisplay(
+                        value: healthGoal.activeEnergyGoal.target.formatted(.number),
+                        unit: String(localized: "kcal")
+                    )
+                    
+                    Stepper(
+                        value: $healthGoal.activeEnergyGoal.target,
+                        in: minimumActiveEnergy...maximumActiveEnergy,
+                        step: activeEnergyIncrement
+                    ) {
+                        Text(String(localized: "Adjust by \(activeEnergyIncrement.formatted())"))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityIdentifier("activeEnergyGoalStepper")
+                }
+                
+                Divider().padding(.vertical, 6)
+                
+                goalToggleRow(
+                    icon: "figure.run",
+                    title: String(localized: "Exercise"),
+                    subtitle: String(localized: "Minutes of movement")
+                ) {
+                    Toggle(isOn: $healthGoal.exerciseGoal.isEnabled) { EmptyView() }
+                        .labelsHidden()
+                        .accessibilityIdentifier("toggleExerciseGoal")
+                }
+                
+                if healthGoal.exerciseGoal.isEnabled {
+                    goalValueDisplay(
+                        value: healthGoal.exerciseGoal.targetMinutes.formatted(.number),
+                        unit: String(localized: "min")
+                    )
+                    
+                    Stepper(
+                        value: $healthGoal.exerciseGoal.targetMinutes,
+                        in: minimumExerciseMinutes...maximumExerciseMinutes,
+                        step: exerciseMinuteIncrement
+                    ) {
+                        Text(String(localized: "Adjust by \(exerciseMinuteIncrement.formatted())"))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityIdentifier("exerciseGoalStepper")
+                    
+                    Picker(String(localized: "Exercise Type"), selection: $healthGoal.exerciseGoal.exerciseType) {
+                        ForEach(ExerciseType.allCases) { type in
+                            Label(type.displayName, systemImage: type.iconName).tag(type)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .accessibilityIdentifier("exerciseTypePicker")
+                }
+                
+                Divider().padding(.vertical, 6)
+                
+                Picker(String(localized: "Unlock Apps When"), selection: $healthGoal.blockingStrategy) {
+                    ForEach(BlockingStrategy.allCases) { strategy in
+                        Text(strategy.displayName).tag(strategy)
+                    }
+                }
+                .accessibilityIdentifier("blockingStrategyPicker")
             }
             .padding(.vertical, 8)
         } header: {
             Text(String(localized: "Goals"))
         } footer: {
-            Text(String(localized: "Set your daily step target. Apps will be blocked until you reach this goal."))
+            Text(String(localized: "Select the goals you want to complete to unlock your apps."))
         }
     }
     
@@ -230,7 +333,7 @@ struct SettingsView: View {
         } header: {
             Text(String(localized: "Blocked Apps"))
         } footer: {
-            Text(String(localized: "Select the apps that will be blocked until you reach your daily step goal."))
+            Text(String(localized: "Select the apps that will be blocked until you reach your enabled goals."))
         }
     }
     
@@ -289,11 +392,58 @@ struct SettingsView: View {
         }
     }
     
-    // MARK: - Computed Properties
+    // MARK: - Goal Helpers
     
-    /// Formats the step goal with thousands separator for display.
-    private var formattedGoal: String {
-        dailyStepGoal.formatted(.number)
+    @ViewBuilder
+    private func goalToggleRow(
+        icon: String,
+        title: String,
+        subtitle: String,
+        @ViewBuilder toggle: () -> some View
+    ) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.title2)
+                .foregroundStyle(.tint)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.headline)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            
+            Spacer()
+            toggle()
+        }
+    }
+    
+    private func goalValueDisplay(value: String, unit: String) -> some View {
+        HStack(spacing: 6) {
+            Text(value)
+                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .contentTransition(.numericText())
+            Text(unit)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .accessibilityIdentifier("goalValueDisplay")
+    }
+    
+    private func loadGoalFromStorage() {
+        if let decoded = HealthGoal.decode(from: healthGoalData) {
+            healthGoal = decoded
+        } else {
+            healthGoal = HealthGoal.load()
+            persistGoal(healthGoal)
+        }
+    }
+    
+    private func persistGoal(_ goal: HealthGoal) {
+        healthGoalData = HealthGoal.encode(goal) ?? ""
+        HealthGoal.save(goal)
     }
     
     // MARK: - Health Permission Display
@@ -323,7 +473,7 @@ struct SettingsView: View {
     private var healthStatusText: String {
         switch healthAuthStatus {
         case .authorized:
-            return String(localized: "Access granted to read step data")
+            return String(localized: "Access granted to read health data")
         case .denied:
             return String(localized: "Access denied - check Settings")
         case .notDetermined:

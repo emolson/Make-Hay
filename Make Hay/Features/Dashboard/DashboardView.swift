@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import HealthKit
 
 /// The main dashboard view showing the user's progress toward their health goal.
 /// Displays step count, loading state, and error handling with retry capability.
@@ -61,7 +62,7 @@ struct DashboardView: View {
                             guard !Task.isCancelled else { return }
                             
                             let previousGoalMet = viewModel.isGoalMet
-                            await viewModel.loadSteps()
+                            await viewModel.loadGoals()
                             
                             // Trigger haptic if goal was just achieved
                             if !previousGoalMet && viewModel.isGoalMet {
@@ -83,7 +84,7 @@ struct DashboardView: View {
         } else if viewModel.hasError {
             errorView
         } else {
-            stepsView
+            goalsView
         }
     }
     
@@ -93,18 +94,18 @@ struct DashboardView: View {
                 .scaleEffect(1.5)
                 .accessibilityIdentifier("loadingIndicator")
             
-            Text(String(localized: "Loading your steps..."))
+            Text(String(localized: "Loading your goals..."))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
-    private var stepsView: some View {
+    private var goalsView: some View {
         VStack(spacing: 24) {
             Spacer()
             
-            progressRing
+            goalRings
             
             goalStatusText
             
@@ -117,81 +118,114 @@ struct DashboardView: View {
             refreshButton
         }
         .padding()
-        .accessibilityIdentifier("Dashboard.stepsView")
+        .accessibilityIdentifier("Dashboard.goalsView")
     }
     
-    /// A circular progress ring showing progress toward the daily step goal.
-    /// **Why ZStack for the ring?** We layer a background circle (track) with
-    /// a foreground circle (progress) to create the ring effect. The trim
-    /// modifier animates based on progress value.
-    private var progressRing: some View {
+    private let ringBaseSize: CGFloat = 240
+    private let ringSpacing: CGFloat = 22
+    private let ringLineWidth: CGFloat = 18
+    
+    /// Concentric rings showing progress for each enabled goal.
+    private var goalRings: some View {
         ZStack {
-            // Background track
-            Circle()
-                .stroke(
-                    Color.secondary.opacity(0.2),
-                    style: StrokeStyle(lineWidth: 20, lineCap: .round)
+            ForEach(Array(viewModel.goalProgresses.enumerated()), id: \.element.id) { index, goal in
+                let size = ringBaseSize - (CGFloat(index) * ringSpacing)
+                GoalRingView(
+                    progress: goal.progress,
+                    ringColor: ringColor(for: goal.type),
+                    size: size,
+                    lineWidth: ringLineWidth,
+                    accessibilityId: "goalRing.\(goal.type.rawValue)"
                 )
+            }
             
-            // Progress arc
-            Circle()
-                .trim(from: 0, to: viewModel.progress)
-                .stroke(
-                    progressGradient,
-                    style: StrokeStyle(lineWidth: 20, lineCap: .round)
-                )
-                .rotationEffect(.degrees(-90))
-                .animation(.easeInOut(duration: 0.5), value: viewModel.progress)
-            
-            // Center content
             VStack(spacing: 8) {
                 if viewModel.isGoalMet {
                     goalMetBadge
+                } else if let primaryGoal = viewModel.primaryGoalProgress {
+                    primaryGoalDisplay(for: primaryGoal)
                 } else {
-                    stepCountDisplay
+                    emptyGoalsDisplay
                 }
             }
         }
-        .frame(width: 240, height: 240)
-        .accessibilityIdentifier("progressRing")
+        .frame(width: ringBaseSize, height: ringBaseSize)
+        .accessibilityIdentifier("goalRings")
     }
     
-    /// The gradient color for the progress ring.
-    /// Changes to green when goal is met to provide visual celebration.
-    private var progressGradient: AngularGradient {
-        if viewModel.isGoalMet {
-            return AngularGradient(
-                colors: [.green, .mint, .green],
-                center: .center,
-                startAngle: .degrees(0),
-                endAngle: .degrees(360)
-            )
-        } else {
-            return AngularGradient(
-                colors: [.blue, .cyan, .blue],
-                center: .center,
-                startAngle: .degrees(0),
-                endAngle: .degrees(360)
-            )
+    private func ringColor(for type: GoalType) -> Color {
+        type.color
+    }
+    
+    private func primaryGoalDisplay(for progress: GoalProgress) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: progress.type.iconName)
+                .font(.system(size: 32))
+                .foregroundStyle(ringColor(for: progress.type))
+                .accessibilityIdentifier("dashboardIcon")
+            
+            Text(formattedCurrentValue(for: progress, includeUnit: false))
+                .font(.system(size: 36, weight: .bold, design: .rounded))
+                .contentTransition(.numericText())
+                .accessibilityIdentifier("primaryGoalValue")
+            
+            Text(progress.type.displayName)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         }
     }
     
-    /// Display for current step count inside the progress ring.
-    private var stepCountDisplay: some View {
-        VStack(spacing: 4) {
-            Image(systemName: "figure.walk")
+    private var emptyGoalsDisplay: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "target")
                 .font(.system(size: 32))
-                .foregroundStyle(.tint)
-                .accessibilityIdentifier("dashboardIcon")
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("emptyGoalsIcon")
             
-            Text(formattedStepCount)
-                .font(.system(size: 36, weight: .bold, design: .rounded))
-                .contentTransition(.numericText())
-                .accessibilityIdentifier("stepCountLabel")
-            
-            Text(String(localized: "steps"))
+            Text(String(localized: "Enable a goal"))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+        }
+    }
+    
+    private func goalSummaryRow(_ progress: GoalProgress) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: progress.type.iconName)
+                .foregroundStyle(ringColor(for: progress.type))
+            
+            Text(progress.type.displayName)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            
+            Spacer()
+            
+            Text("\(formattedCurrentValue(for: progress, includeUnit: true)) / \(formattedTargetValue(for: progress))")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityIdentifier("goalSummaryRow.\(progress.type.rawValue)")
+    }
+    
+    private func formattedCurrentValue(for progress: GoalProgress, includeUnit: Bool) -> String {
+        switch progress.type {
+        case .steps:
+            let value = Int(progress.current).formatted(.number)
+            return includeUnit ? value + " steps" : value
+        case .activeEnergy:
+            return Int(progress.current).formatted(.number) + " kcal"
+        case .exercise:
+            return Int(progress.current).formatted(.number) + " min"
+        }
+    }
+    
+    private func formattedTargetValue(for progress: GoalProgress) -> String {
+        switch progress.type {
+        case .steps:
+            return Int(progress.target).formatted(.number) + " steps"
+        case .activeEnergy:
+            return Int(progress.target).formatted(.number) + " kcal"
+        case .exercise:
+            return Int(progress.target).formatted(.number) + " min"
         }
     }
     
@@ -200,31 +234,33 @@ struct DashboardView: View {
         VStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 48))
-                .foregroundStyle(.green)
+                .foregroundStyle(Color.goalExercise)
                 .accessibilityIdentifier("goalMetBadge")
             
-            Text(String(localized: "Goal Met!"))
+            Text(String(localized: "Goals Met!"))
                 .font(.headline)
-                .foregroundStyle(.green)
+                .foregroundStyle(Color.goalExercise)
             
-            Text(formattedStepCount)
-                .font(.system(size: 24, weight: .semibold, design: .rounded))
-                .contentTransition(.numericText())
-                .accessibilityIdentifier("stepCountLabel")
+            Text(String(localized: "Apps Unlocked"))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         }
     }
     
     /// Text showing progress as "X / Y steps" below the ring.
     private var goalStatusText: some View {
         VStack(spacing: 4) {
-            Text(String(localized: "\(formattedStepCount) / \(formattedGoal) steps"))
-                .font(.title3)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("progressText")
-            
-            if !viewModel.isGoalMet {
-                let remaining = max(0, viewModel.dailyStepGoal - viewModel.currentSteps)
-                Text(String(localized: "\(remaining.formatted()) steps to go"))
+            if viewModel.goalProgresses.isEmpty {
+                Text(String(localized: "No goals enabled"))
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("progressText")
+            } else {
+                ForEach(viewModel.goalProgresses) { progress in
+                    goalSummaryRow(progress)
+                }
+                
+                Text(String(localized: "Unlocks when: \(viewModel.healthGoal.blockingStrategy.displayName)"))
                     .font(.subheadline)
                     .foregroundStyle(.tertiary)
             }
@@ -249,18 +285,10 @@ struct DashboardView: View {
         .accessibilityIdentifier("blockingStatusBadge")
     }
     
-    private var formattedStepCount: String {
-        viewModel.currentSteps.formatted(.number)
-    }
-    
-    private var formattedGoal: String {
-        viewModel.dailyStepGoal.formatted(.number)
-    }
-    
     private var refreshButton: some View {
         Button {
             Task {
-                await viewModel.loadSteps()
+                await viewModel.loadGoals()
             }
         } label: {
             Label(
@@ -280,7 +308,7 @@ struct DashboardView: View {
                 .foregroundStyle(.orange)
                 .accessibilityIdentifier("errorIcon")
             
-            Text(String(localized: "Unable to Load Steps"))
+            Text(String(localized: "Unable to Load Goals"))
                 .font(.title2)
                 .fontWeight(.semibold)
             
@@ -316,7 +344,9 @@ struct DashboardView: View {
 #Preview("Progress - 50%") {
     let mock = MockHealthService()
     Task { @MainActor in
-        // Simulate 5000 of 10000 steps
+        await mock.setMockSteps(5_000)
+        await mock.setMockActiveEnergy(250)
+        await mock.setMockExerciseMinutes(10)
     }
     return DashboardView(viewModel: DashboardViewModel(healthService: mock, blockerService: MockBlockerService()))
 }
@@ -325,6 +355,8 @@ struct DashboardView: View {
     let mock = MockHealthService()
     Task { @MainActor in
         await mock.setMockSteps(12_500)
+        await mock.setMockActiveEnergy(650)
+        await mock.setMockExerciseMinutes(45)
     }
     return DashboardView(viewModel: DashboardViewModel(healthService: mock, blockerService: MockBlockerService()))
 }
@@ -351,6 +383,14 @@ private actor ErrorThrowingMockHealthService: HealthServiceProtocol {
     }
     
     func fetchDailySteps() async throws -> Int {
+        throw HealthServiceError.authorizationDenied
+    }
+    
+    func fetchActiveEnergy() async throws -> Double {
+        throw HealthServiceError.authorizationDenied
+    }
+    
+    func fetchExerciseMinutes(for activityType: HKWorkoutActivityType?) async throws -> Int {
         throw HealthServiceError.authorizationDenied
     }
 }

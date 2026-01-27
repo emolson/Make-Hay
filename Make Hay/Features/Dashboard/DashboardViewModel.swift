@@ -6,6 +6,60 @@
 //
 
 import SwiftUI
+import HealthKit
+
+/// Supported goal types for dashboard display.
+enum GoalType: String, Sendable, CaseIterable, Identifiable {
+    case steps
+    case activeEnergy
+    case exercise
+    
+    var id: String { rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .steps:
+            return String(localized: "Steps")
+        case .activeEnergy:
+            return String(localized: "Active Energy")
+        case .exercise:
+            return String(localized: "Exercise")
+        }
+    }
+    
+    var iconName: String {
+        switch self {
+        case .steps:
+            return "figure.walk"
+        case .activeEnergy:
+            return "flame"
+        case .exercise:
+            return "figure.run"
+        }
+    }
+    
+    var color: Color {
+        switch self {
+        case .steps:
+            return .goalSteps
+        case .activeEnergy:
+            return .goalActiveEnergy
+        case .exercise:
+            return .goalExercise
+        }
+    }
+}
+
+/// Progress information for a single goal.
+struct GoalProgress: Identifiable, Sendable, Equatable {
+    let type: GoalType
+    let current: Double
+    let target: Double
+    let progress: Double
+    let isMet: Bool
+    
+    var id: GoalType { type }
+}
 
 /// ViewModel for the Dashboard feature, managing health data state and user interactions.
 ///
@@ -21,9 +75,14 @@ final class DashboardViewModel {
     /// The current step count fetched from HealthKit.
     var currentSteps: Int = 0
     
-    /// The user's daily step goal, read from UserDefaults via AppStorage key.
-    /// This is refreshed each time the view appears to stay in sync with Settings.
-    var dailyStepGoal: Int = 10_000
+    /// The current active energy fetched from HealthKit (kilocalories).
+    var currentActiveEnergy: Double = 0
+    
+    /// The current exercise minutes fetched from HealthKit.
+    var currentExerciseMinutes: Int = 0
+    
+    /// The user's goal configuration, refreshed from storage on appearance.
+    var healthGoal: HealthGoal = HealthGoal.load()
     
     /// Indicates whether a data fetch is in progress.
     var isLoading: Bool = false
@@ -46,16 +105,67 @@ final class DashboardViewModel {
     @ObservationIgnored
     @AppStorage("lastCheckedDate") private var lastCheckedDate: String = ""
     
-    /// Calculates the user's progress toward their daily step goal.
-    /// Returns a value between 0.0 and 1.0 (capped at 1.0 even if goal exceeded).
-    var progress: Double {
-        guard dailyStepGoal > 0 else { return 0.0 }
-        return min(Double(currentSteps) / Double(dailyStepGoal), 1.0)
+    /// Returns all enabled goal progress values, ordered for display.
+    var goalProgresses: [GoalProgress] {
+        var items: [GoalProgress] = []
+        
+        if healthGoal.stepGoal.isEnabled {
+            let target = Double(max(healthGoal.stepGoal.target, 1))
+            let current = Double(currentSteps)
+            let progress = min(current / target, 1.0)
+            items.append(GoalProgress(
+                type: .steps,
+                current: current,
+                target: target,
+                progress: progress,
+                isMet: currentSteps >= healthGoal.stepGoal.target
+            ))
+        }
+        
+        if healthGoal.activeEnergyGoal.isEnabled {
+            let target = Double(max(healthGoal.activeEnergyGoal.target, 1))
+            let progress = min(currentActiveEnergy / target, 1.0)
+            items.append(GoalProgress(
+                type: .activeEnergy,
+                current: currentActiveEnergy,
+                target: target,
+                progress: progress,
+                isMet: currentActiveEnergy >= Double(healthGoal.activeEnergyGoal.target)
+            ))
+        }
+        
+        if healthGoal.exerciseGoal.isEnabled {
+            let target = Double(max(healthGoal.exerciseGoal.targetMinutes, 1))
+            let current = Double(currentExerciseMinutes)
+            let progress = min(current / target, 1.0)
+            items.append(GoalProgress(
+                type: .exercise,
+                current: current,
+                target: target,
+                progress: progress,
+                isMet: currentExerciseMinutes >= healthGoal.exerciseGoal.targetMinutes
+            ))
+        }
+        
+        return items
     }
     
-    /// Indicates whether the user has met or exceeded their daily step goal.
+    /// Returns the primary goal to display at the center of the rings.
+    var primaryGoalProgress: GoalProgress? {
+        goalProgresses.first
+    }
+    
+    /// Indicates whether the user has met their goal criteria based on blocking strategy.
     var isGoalMet: Bool {
-        currentSteps >= dailyStepGoal
+        let progresses = goalProgresses
+        guard !progresses.isEmpty else { return true }
+        
+        switch healthGoal.blockingStrategy {
+        case .any:
+            return progresses.contains { $0.isMet }
+        case .all:
+            return progresses.allSatisfy { $0.isMet }
+        }
     }
     
     // MARK: - Dependencies
@@ -91,10 +201,10 @@ final class DashboardViewModel {
         await requestAuthorizationAndLoad()
     }
     
-    /// Fetches the current day's step count from HealthKit.
-    /// Updates `currentSteps`, `isLoading`, and `errorMessage` accordingly.
+    /// Fetches the current day's health metrics from HealthKit.
+    /// Updates current values, loading state, and error state.
     /// Note: This assumes authorization has already been granted.
-    func loadSteps() async {
+    func loadGoals() async {
         // Check if it's a new day before loading steps
         checkForNewDay()
         
@@ -104,8 +214,12 @@ final class DashboardViewModel {
         defer { isLoading = false }
         
         do {
-            currentSteps = try await healthService.fetchDailySteps()
-            // Check and update blocking status after loading steps
+            refreshGoalFromStorage()
+            let results = try await fetchEnabledGoals()
+            currentSteps = results.steps
+            currentActiveEnergy = results.activeEnergy
+            currentExerciseMinutes = results.exerciseMinutes
+            // Check and update blocking status after loading metrics
             await checkGoalStatus()
         } catch {
             errorMessage = error.localizedDescription
@@ -125,8 +239,12 @@ final class DashboardViewModel {
         
         do {
             try await healthService.requestAuthorization()
-            currentSteps = try await healthService.fetchDailySteps()
-            // Check and update blocking status after loading steps
+            refreshGoalFromStorage()
+            let results = try await fetchEnabledGoals()
+            currentSteps = results.steps
+            currentActiveEnergy = results.activeEnergy
+            currentExerciseMinutes = results.exerciseMinutes
+            // Check and update blocking status after loading metrics
             await checkGoalStatus()
         } catch {
             errorMessage = error.localizedDescription
@@ -157,6 +275,8 @@ final class DashboardViewModel {
             // The subsequent fetchDailySteps() will get today's actual (likely low) count
             // and checkGoalStatus() will re-engage blocking if needed
             currentSteps = 0
+            currentActiveEnergy = 0
+            currentExerciseMinutes = 0
         }
     }
     
@@ -168,7 +288,8 @@ final class DashboardViewModel {
     /// - Returns: True if blocking state changed from blocked to unblocked (goal achieved)
     @discardableResult
     private func checkGoalStatus() async -> Bool {
-        let shouldBlock = currentSteps < dailyStepGoal
+        let hasEnabledGoals = !goalProgresses.isEmpty
+        let shouldBlock = hasEnabledGoals ? !isGoalMet : false
         let wasBlocking = isBlocking
         
         if shouldBlock {
@@ -188,10 +309,47 @@ final class DashboardViewModel {
     /// @AppStorage. We read it here to ensure the dashboard always reflects the latest
     /// goal, even if the user changes it in Settings without restarting the app.
     private func refreshGoalFromStorage() {
-        dailyStepGoal = UserDefaults.standard.integer(forKey: "dailyStepGoal")
-        // If no value has been set, use the default
-        if dailyStepGoal == 0 {
-            dailyStepGoal = 10_000
+        healthGoal = HealthGoal.load()
+    }
+
+    private func fetchEnabledGoals() async throws -> (steps: Int, activeEnergy: Double, exerciseMinutes: Int) {
+        var results = (steps: 0, activeEnergy: 0.0, exerciseMinutes: 0)
+        
+        try await withThrowingTaskGroup(of: (GoalType, Double).self) { group in
+            if healthGoal.stepGoal.isEnabled {
+                group.addTask {
+                    let steps = try await self.healthService.fetchDailySteps()
+                    return (.steps, Double(steps))
+                }
+            }
+            
+            if healthGoal.activeEnergyGoal.isEnabled {
+                group.addTask {
+                    let energy = try await self.healthService.fetchActiveEnergy()
+                    return (.activeEnergy, energy)
+                }
+            }
+            
+            if healthGoal.exerciseGoal.isEnabled {
+                let activityType = healthGoal.exerciseGoal.exerciseType.hkWorkoutActivityType
+                group.addTask {
+                    let minutes = try await self.healthService.fetchExerciseMinutes(for: activityType)
+                    return (.exercise, Double(minutes))
+                }
+            }
+            
+            for try await (type, value) in group {
+                switch type {
+                case .steps:
+                    results.steps = Int(value)
+                case .activeEnergy:
+                    results.activeEnergy = value
+                case .exercise:
+                    results.exerciseMinutes = Int(value)
+                }
+            }
         }
+        
+        return results
     }
 }

@@ -136,7 +136,7 @@ private struct HealthPermissionStepView: View {
                 .fontWeight(.bold)
                 .multilineTextAlignment(.center)
             
-            Text(String(localized: "We need access to your step count to track your daily progress and unlock your apps."))
+            Text(String(localized: "We need access to your health data to track your goals and unlock your apps."))
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
