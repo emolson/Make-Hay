@@ -19,7 +19,7 @@ You are an expert Senior iOS System Architect. Your goal is to produce clean, re
 
 ## 3. UI & Styling
 
-- **Design System:** Do not hardcode colors or fonts. Use semantic names (e.g., `Color.backgroundPrimary`, `Font.header`).
+- **Design System:** Maintain `Assets.xcassets` as the source of truth for colors and images. Access them using type-safe extensions in `DesignSystem.swift` (e.g., `Color(.goalSteps)`), relying on generated asset symbols. Do not hardcode hex values.
 - **Previews:** Every View must have a valid `#Preview` with mock data.
 - **Components:** Break large views into small, reusable `@ViewBuilder` components or separate structs.
 - **Navigation:** Use `NavigationStack` only. Never use `NavigationView` (deprecated).

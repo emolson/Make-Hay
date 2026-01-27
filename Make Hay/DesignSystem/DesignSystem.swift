@@ -14,14 +14,14 @@ enum DesignSystem {}
 
 extension Color {
     /// Goal ring colors
-    static var goalSteps: Color { Color("GoalSteps") }
-    static var goalActiveEnergy: Color { Color("GoalActiveEnergy") }
-    static var goalExercise: Color { Color("GoalExercise") }
-    static var goalRingTrack: Color { Color("GoalRingTrack") }
+    static var goalSteps: Color { Color(.goalSteps) }
+    static var goalActiveEnergy: Color { Color(.goalActiveEnergy) }
+    static var goalExercise: Color { Color(.goalExercise) }
+    static var goalRingTrack: Color { Color(.goalRingTrack) }
 
     /// Status colors
-    static var statusBlocked: Color { Color("StatusBlocked") }
-    static var statusWarning: Color { Color("StatusWarning") }
+    static var statusBlocked: Color { Color(.statusBlocked) }
+    static var statusWarning: Color { Color(.statusWarning) }
 }
 
 // MARK: - Fonts
