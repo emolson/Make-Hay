@@ -307,6 +307,7 @@ struct SettingsView: View {
                         }
                     }
                     .pickerStyle(.menu)
+                    .padding(.top, 12)
                     .accessibilityIdentifier("exerciseTypePicker")
                 }
                 

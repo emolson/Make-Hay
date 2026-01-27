@@ -314,31 +314,60 @@ final class DashboardViewModel {
 
     private func fetchEnabledGoals() async throws -> (steps: Int, activeEnergy: Double, exerciseMinutes: Int) {
         var results = (steps: 0, activeEnergy: 0.0, exerciseMinutes: 0)
+        var authorizationError: Error?
         
-        try await withThrowingTaskGroup(of: (GoalType, Double).self) { group in
+        await withTaskGroup(of: (GoalType, Double, Error?).self) { group in
             if healthGoal.stepGoal.isEnabled {
                 group.addTask {
-                    let steps = try await self.healthService.fetchDailySteps()
-                    return (.steps, Double(steps))
+                    do {
+                        let steps = try await self.healthService.fetchDailySteps()
+                        return (.steps, Double(steps), nil)
+                    } catch {
+                        // Only propagate authorization errors, treat missing data as 0
+                        if case HealthServiceError.authorizationDenied = error {
+                            return (.steps, 0, error)
+                        }
+                        return (.steps, 0, nil)
+                    }
                 }
             }
             
             if healthGoal.activeEnergyGoal.isEnabled {
                 group.addTask {
-                    let energy = try await self.healthService.fetchActiveEnergy()
-                    return (.activeEnergy, energy)
+                    do {
+                        let energy = try await self.healthService.fetchActiveEnergy()
+                        return (.activeEnergy, energy, nil)
+                    } catch {
+                        // Only propagate authorization errors, treat missing data as 0
+                        if case HealthServiceError.authorizationDenied = error {
+                            return (.activeEnergy, 0, error)
+                        }
+                        return (.activeEnergy, 0, nil)
+                    }
                 }
             }
             
             if healthGoal.exerciseGoal.isEnabled {
                 let activityType = healthGoal.exerciseGoal.exerciseType.hkWorkoutActivityType
                 group.addTask {
-                    let minutes = try await self.healthService.fetchExerciseMinutes(for: activityType)
-                    return (.exercise, Double(minutes))
+                    do {
+                        let minutes = try await self.healthService.fetchExerciseMinutes(for: activityType)
+                        return (.exercise, Double(minutes), nil)
+                    } catch {
+                        // Only propagate authorization errors, treat missing data as 0
+                        if case HealthServiceError.authorizationDenied = error {
+                            return (.exercise, 0, error)
+                        }
+                        return (.exercise, 0, nil)
+                    }
                 }
             }
             
-            for try await (type, value) in group {
+            for await (type, value, error) in group {
+                if let error = error {
+                    authorizationError = error
+                }
+                
                 switch type {
                 case .steps:
                     results.steps = Int(value)
@@ -348,6 +377,11 @@ final class DashboardViewModel {
                     results.exerciseMinutes = Int(value)
                 }
             }
+        }
+        
+        // Only throw if we encountered an actual authorization error
+        if let authorizationError {
+            throw authorizationError
         }
         
         return results

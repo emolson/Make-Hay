@@ -45,15 +45,6 @@ struct GoalRingView: View {
     }
 }
 
-// MARK: - Semantic Colors
-
-extension Color {
-    static var goalSteps: Color { .blue }
-    static var goalActiveEnergy: Color { .orange }
-    static var goalExercise: Color { .green }
-    static var goalRingTrack: Color { .secondary.opacity(0.2) }
-}
-
 #Preview("Goal Ring") {
     GoalRingView(
         progress: 0.65,

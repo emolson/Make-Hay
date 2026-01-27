@@ -160,12 +160,12 @@ struct DashboardView: View {
     private func primaryGoalDisplay(for progress: GoalProgress) -> some View {
         VStack(spacing: 4) {
             Image(systemName: progress.type.iconName)
-                .font(.system(size: 32))
+                .font(.dashboardIcon)
                 .foregroundStyle(ringColor(for: progress.type))
                 .accessibilityIdentifier("dashboardIcon")
             
             Text(formattedCurrentValue(for: progress, includeUnit: false))
-                .font(.system(size: 36, weight: .bold, design: .rounded))
+                .font(.dashboardPrimaryValue)
                 .contentTransition(.numericText())
                 .accessibilityIdentifier("primaryGoalValue")
             
@@ -178,7 +178,7 @@ struct DashboardView: View {
     private var emptyGoalsDisplay: some View {
         VStack(spacing: 6) {
             Image(systemName: "target")
-                .font(.system(size: 32))
+                .font(.dashboardIcon)
                 .foregroundStyle(.secondary)
                 .accessibilityIdentifier("emptyGoalsIcon")
             
@@ -209,31 +209,58 @@ struct DashboardView: View {
     private func formattedCurrentValue(for progress: GoalProgress, includeUnit: Bool) -> String {
         switch progress.type {
         case .steps:
-            let value = Int(progress.current).formatted(.number)
-            return includeUnit ? value + " steps" : value
+            let value = Int(progress.current)
+            let formatted = value.formatted(.number)
+            return includeUnit ? localizedStepsValue(formatted) : formatted
         case .activeEnergy:
-            return Int(progress.current).formatted(.number) + " kcal"
+            return localizedKilocaloriesValue(Int(progress.current))
         case .exercise:
-            return Int(progress.current).formatted(.number) + " min"
+            return localizedMinutesValue(Int(progress.current))
         }
     }
     
     private func formattedTargetValue(for progress: GoalProgress) -> String {
         switch progress.type {
         case .steps:
-            return Int(progress.target).formatted(.number) + " steps"
+            return localizedStepsValue(Int(progress.target).formatted(.number))
         case .activeEnergy:
-            return Int(progress.target).formatted(.number) + " kcal"
+            return localizedKilocaloriesValue(Int(progress.target))
         case .exercise:
-            return Int(progress.target).formatted(.number) + " min"
+            return localizedMinutesValue(Int(progress.target))
         }
+    }
+
+    private func localizedStepsValue(_ formattedValue: String) -> String {
+        String(
+            localized: "dashboard.units.steps",
+            defaultValue: "\(formattedValue) steps",
+            comment: "Steps value with unit"
+        )
+    }
+
+    private func localizedKilocaloriesValue(_ value: Int) -> String {
+        let formatted = value.formatted(.number)
+        return String(
+            localized: "dashboard.units.kilocalories",
+            defaultValue: "\(formatted) kcal",
+            comment: "Active energy value in kilocalories"
+        )
+    }
+
+    private func localizedMinutesValue(_ value: Int) -> String {
+        let formatted = value.formatted(.number)
+        return String(
+            localized: "dashboard.units.minutes",
+            defaultValue: "\(formatted) min",
+            comment: "Exercise minutes value with unit"
+        )
     }
     
     /// Celebratory badge shown when the user meets their goal.
     private var goalMetBadge: some View {
         VStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 48))
+                .font(.dashboardGoalMetIcon)
                 .foregroundStyle(Color.goalExercise)
                 .accessibilityIdentifier("goalMetBadge")
             
@@ -281,7 +308,7 @@ struct DashboardView: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(.red.gradient, in: Capsule())
+        .background(Color.statusBlocked.gradient, in: Capsule())
         .accessibilityIdentifier("blockingStatusBadge")
     }
     
@@ -304,8 +331,8 @@ struct DashboardView: View {
     private var errorView: some View {
         VStack(spacing: 20) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 50))
-                .foregroundStyle(.orange)
+                .font(.dashboardErrorIcon)
+                .foregroundStyle(Color.statusWarning)
                 .accessibilityIdentifier("errorIcon")
             
             Text(String(localized: "Unable to Load Goals"))
