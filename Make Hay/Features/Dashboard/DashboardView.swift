@@ -122,7 +122,7 @@ struct DashboardView: View {
     }
     
     private let ringBaseSize: CGFloat = 240
-    private let ringSpacing: CGFloat = 22
+    private let ringSpacing: CGFloat = 28
     private let ringLineWidth: CGFloat = 18
     
     /// Concentric rings showing progress for each enabled goal.
