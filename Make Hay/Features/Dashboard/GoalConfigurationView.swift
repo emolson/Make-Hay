@@ -40,6 +40,10 @@ struct GoalConfigurationView: View {
         _viewModel = State(initialValue: viewModel)
         self.goalType = goalType
         
+        // Initialize unlockTime with a default (only used for .timeUnlock goals)
+        let defaultUnlockTime = viewModel.healthGoal.timeBlockGoal.unlockDate()
+        _unlockTime = State(initialValue: defaultUnlockTime)
+        
         // Pre-fill with existing values or smart defaults
         switch goalType {
         case .steps:
@@ -50,8 +54,6 @@ struct GoalConfigurationView: View {
             _targetValue = State(initialValue: Double(viewModel.healthGoal.exerciseGoal.targetMinutes))
             _selectedExerciseType = State(initialValue: viewModel.healthGoal.exerciseGoal.exerciseType)
         case .timeUnlock:
-            let unlockDate = viewModel.healthGoal.timeBlockGoal.unlockDate()
-            _unlockTime = State(initialValue: unlockDate)
             _targetValue = State(initialValue: Double(viewModel.healthGoal.timeBlockGoal.unlockTimeMinutes))
         }
     }
