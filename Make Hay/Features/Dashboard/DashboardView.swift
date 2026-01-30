@@ -48,6 +48,21 @@ struct DashboardView: View {
         NavigationStack {
             content
                 .navigationTitle(String(localized: "Make Hay"))
+                .toolbar {
+                    if viewModel.canAddMoreGoals && !viewModel.goalProgresses.isEmpty {
+                        ToolbarItem(placement: .primaryAction) {
+                            Button {
+                                viewModel.isShowingAddGoal = true
+                            } label: {
+                                Label(String(localized: "Add Goal"), systemImage: "plus.circle.fill")
+                            }
+                            .accessibilityIdentifier("addGoalButton")
+                        }
+                    }
+                }
+                .sheet(isPresented: $viewModel.isShowingAddGoal) {
+                    AddGoalView(viewModel: viewModel)
+                }
                 .task {
                     await viewModel.onAppear()
                 }
@@ -176,16 +191,22 @@ struct DashboardView: View {
     }
     
     private var emptyGoalsDisplay: some View {
-        VStack(spacing: 6) {
-            Image(systemName: "target")
-                .font(.dashboardIcon)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("emptyGoalsIcon")
-            
-            Text(String(localized: "Enable a goal"))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+        Button {
+            viewModel.isShowingAddGoal = true
+        } label: {
+            VStack(spacing: 8) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.dashboardIcon)
+                    .foregroundStyle(.tint)
+                    .accessibilityIdentifier("emptyGoalsIcon")
+                
+                Text(String(localized: "Add Goal"))
+                    .font(.headline)
+                    .foregroundStyle(.tint)
+            }
         }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("addFirstGoalButton")
     }
     
     private func goalSummaryRow(_ progress: GoalProgress) -> some View {
@@ -216,6 +237,8 @@ struct DashboardView: View {
             return localizedKilocaloriesValue(Int(progress.current))
         case .exercise:
             return localizedMinutesValue(Int(progress.current))
+        case .timeUnlock:
+            return formattedTimeValue(minutesSinceMidnight: Int(progress.current))
         }
     }
     
@@ -227,6 +250,8 @@ struct DashboardView: View {
             return localizedKilocaloriesValue(Int(progress.target))
         case .exercise:
             return localizedMinutesValue(Int(progress.target))
+        case .timeUnlock:
+            return formattedTimeValue(minutesSinceMidnight: Int(progress.target))
         }
     }
 
@@ -255,6 +280,14 @@ struct DashboardView: View {
             comment: "Exercise minutes value with unit"
         )
     }
+
+    private func formattedTimeValue(minutesSinceMidnight: Int) -> String {
+        let clamped = min(max(minutesSinceMidnight, 0), (24 * 60) - 1)
+        let hour = clamped / 60
+        let minute = clamped % 60
+        let date = Calendar.current.date(bySettingHour: hour, minute: minute, second: 0, of: Date()) ?? Date()
+        return date.formatted(date: .omitted, time: .shortened)
+    }
     
     /// Celebratory badge shown when the user meets their goal.
     private var goalMetBadge: some View {
@@ -278,10 +311,24 @@ struct DashboardView: View {
     private var goalStatusText: some View {
         VStack(spacing: 4) {
             if viewModel.goalProgresses.isEmpty {
-                Text(String(localized: "No goals enabled"))
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("progressText")
+                VStack(spacing: 12) {
+                    Text(String(localized: "Add your first goal to start"))
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("progressText")
+                    
+                    Button {
+                        viewModel.isShowingAddGoal = true
+                    } label: {
+                        Text(String(localized: "Get Started"))
+                            .font(.headline)
+                            .frame(minWidth: 200)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .accessibilityIdentifier("getStartedButton")
+                }
+                .padding(.vertical)
             } else {
                 ForEach(viewModel.goalProgresses) { progress in
                     goalSummaryRow(progress)

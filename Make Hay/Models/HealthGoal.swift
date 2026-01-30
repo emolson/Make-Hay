@@ -16,6 +16,8 @@ struct HealthGoal: Codable, Sendable, Equatable {
     var activeEnergyGoal: ActiveEnergyGoal = .init()
     /// The user's exercise goal configuration.
     var exerciseGoal: ExerciseGoal = .init()
+    /// The user's time-based unlock goal configuration.
+    var timeBlockGoal: TimeBlockGoal = .init()
     /// Strategy for determining when goals unlock apps.
     var blockingStrategy: BlockingStrategy = .any
 }
@@ -37,6 +39,18 @@ struct ExerciseGoal: Codable, Sendable, Equatable {
     var isEnabled: Bool = false
     var targetMinutes: Int = 30
     var exerciseType: ExerciseType = .any
+}
+
+/// Configuration for a time-based unlock goal.
+/// Stores the unlock time as minutes since midnight.
+///
+/// **Midnight Edge Case:** If `unlockTimeMinutes` is 0 (midnight), the goal is
+/// considered instantly met, meaning apps are never blocked. This allows users
+/// to effectively disable time-based blocking while keeping the goal enabled.
+struct TimeBlockGoal: Codable, Sendable, Equatable {
+    var isEnabled: Bool = false
+    /// Minutes since midnight (0-1439). Default is 7 PM (19:00).
+    var unlockTimeMinutes: Int = 19 * 60
 }
 
 /// Defines when apps unlock relative to enabled goals.
@@ -116,6 +130,34 @@ enum ExerciseType: String, Codable, CaseIterable, Sendable, Identifiable {
         case .strengthTraining:
             return .traditionalStrengthTraining
         }
+    }
+}
+
+extension TimeBlockGoal {
+    private static let minutesInDay: Int = 24 * 60
+
+    /// Returns the unlock time clamped to a valid day range.
+    var clampedUnlockMinutes: Int {
+        min(max(unlockTimeMinutes, 0), Self.minutesInDay - 1)
+    }
+
+    /// Returns the unlock time as a Date on the given day.
+    func unlockDate(on date: Date = Date()) -> Date {
+        let hour = clampedUnlockMinutes / 60
+        let minute = clampedUnlockMinutes % 60
+        return Calendar.current.date(
+            bySettingHour: hour,
+            minute: minute,
+            second: 0,
+            of: date
+        ) ?? date
+    }
+
+    /// Updates the unlock time using a Date value.
+    mutating func setUnlockTime(_ date: Date) {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+        let minutes = (components.hour ?? 0) * 60 + (components.minute ?? 0)
+        unlockTimeMinutes = min(max(minutes, 0), Self.minutesInDay - 1)
     }
 }
 

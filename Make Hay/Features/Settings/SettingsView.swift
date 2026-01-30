@@ -77,6 +77,16 @@ struct SettingsView: View {
     
     /// The increment for exercise minutes.
     private let exerciseMinuteIncrement: Int = 5
+
+    /// Binding for the time-based unlock picker.
+    private var timeUnlockBinding: Binding<Date> {
+        Binding(
+            get: { healthGoal.timeBlockGoal.unlockDate() },
+            set: { newValue in
+                healthGoal.timeBlockGoal.setUnlockTime(newValue)
+            }
+        )
+    }
     
     // MARK: - Body
     
@@ -310,6 +320,30 @@ struct SettingsView: View {
                     .padding(.top, 12)
                     .accessibilityIdentifier("exerciseTypePicker")
                 }
+
+                Divider().padding(.vertical, 6)
+
+                goalToggleRow(
+                    icon: "clock",
+                    title: String(localized: "Time Lock"),
+                    subtitle: String(localized: "Block apps until a set time")
+                ) {
+                    Toggle(isOn: $healthGoal.timeBlockGoal.isEnabled) { EmptyView() }
+                        .labelsHidden()
+                        .accessibilityIdentifier("toggleTimeBlockGoal")
+                }
+
+                if healthGoal.timeBlockGoal.isEnabled {
+                    timeGoalValueDisplay(time: formattedUnlockTime)
+
+                    DatePicker(
+                        String(localized: "Unlock Time"),
+                        selection: timeUnlockBinding,
+                        displayedComponents: .hourAndMinute
+                    )
+                    .datePickerStyle(.compact)
+                    .accessibilityIdentifier("timeUnlockPicker")
+                }
                 
                 Divider().padding(.vertical, 6)
                 
@@ -431,6 +465,22 @@ struct SettingsView: View {
             Spacer()
         }
         .accessibilityIdentifier("goalValueDisplay")
+    }
+
+    private func timeGoalValueDisplay(time: String) -> some View {
+        HStack(spacing: 6) {
+            Text(time)
+                .font(.system(size: 28, weight: .bold, design: .rounded))
+            Text(String(localized: "unlock time"))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .accessibilityIdentifier("timeGoalValueDisplay")
+    }
+
+    private var formattedUnlockTime: String {
+        healthGoal.timeBlockGoal.unlockDate().formatted(date: .omitted, time: .shortened)
     }
     
     private func loadGoalFromStorage() {

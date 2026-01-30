@@ -18,6 +18,7 @@ extension Color {
     static var goalActiveEnergy: Color { Color(.goalActiveEnergy) }
     static var goalExercise: Color { Color(.goalExercise) }
     static var goalRingTrack: Color { Color(.goalRingTrack) }
+    static var goalTimeUnlock: Color { .orange }
 
     /// Status colors
     static var statusBlocked: Color { Color(.statusBlocked) }

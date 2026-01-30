@@ -13,6 +13,7 @@ enum GoalType: String, Sendable, CaseIterable, Identifiable {
     case steps
     case activeEnergy
     case exercise
+    case timeUnlock
     
     var id: String { rawValue }
     
@@ -24,6 +25,8 @@ enum GoalType: String, Sendable, CaseIterable, Identifiable {
             return String(localized: "Active Energy")
         case .exercise:
             return String(localized: "Exercise")
+        case .timeUnlock:
+            return String(localized: "Time")
         }
     }
     
@@ -35,6 +38,8 @@ enum GoalType: String, Sendable, CaseIterable, Identifiable {
             return "flame"
         case .exercise:
             return "figure.run"
+        case .timeUnlock:
+            return "clock"
         }
     }
     
@@ -46,6 +51,8 @@ enum GoalType: String, Sendable, CaseIterable, Identifiable {
             return .goalActiveEnergy
         case .exercise:
             return .goalExercise
+        case .timeUnlock:
+            return .goalTimeUnlock
         }
     }
 }
@@ -100,10 +107,30 @@ final class DashboardViewModel {
         errorMessage != nil
     }
     
+    /// Controls presentation of the Add Goal sheet.
+    var isShowingAddGoal: Bool = false
+    
     /// The last date the app checked for steps, stored as ISO8601 string.
     /// Used to detect when a new day has started and reset blocking accordingly.
     @ObservationIgnored
     @AppStorage("lastCheckedDate") private var lastCheckedDate: String = ""
+
+    /// Task used to unlock apps when a time-based goal becomes active.
+    private var timeUnlockTask: Task<Void, Never>?
+    
+    /// Returns goal types that are available to be added (not currently enabled).
+    /// **Why this matters?** Prevents users from adding duplicate goals and provides
+    /// a clean way to determine which options to show in the AddGoalView.
+    var availableGoalTypes: [GoalType] {
+        GoalType.allCases.filter { type in
+            !goalProgresses.contains { $0.type == type }
+        }
+    }
+    
+    /// Indicates whether the user can add more goals.
+    var canAddMoreGoals: Bool {
+        !availableGoalTypes.isEmpty
+    }
     
     /// Returns all enabled goal progress values, ordered for display.
     var goalProgresses: [GoalProgress] {
@@ -144,6 +171,21 @@ final class DashboardViewModel {
                 target: target,
                 progress: progress,
                 isMet: currentExerciseMinutes >= healthGoal.exerciseGoal.targetMinutes
+            ))
+        }
+
+        if healthGoal.timeBlockGoal.isEnabled {
+            let nowMinutes = Double(currentMinutesSinceMidnight())
+            let unlockMinutes = Double(max(healthGoal.timeBlockGoal.clampedUnlockMinutes, 1))
+            let progress = min(nowMinutes / unlockMinutes, 1.0)
+            let isMet = healthGoal.timeBlockGoal.clampedUnlockMinutes == 0
+                || currentMinutesSinceMidnight() >= healthGoal.timeBlockGoal.clampedUnlockMinutes
+            items.append(GoalProgress(
+                type: .timeUnlock,
+                current: nowMinutes,
+                target: unlockMinutes,
+                progress: progress,
+                isMet: isMet
             ))
         }
         
@@ -219,6 +261,7 @@ final class DashboardViewModel {
             currentSteps = results.steps
             currentActiveEnergy = results.activeEnergy
             currentExerciseMinutes = results.exerciseMinutes
+            scheduleTimeUnlockIfNeeded()
             // Check and update blocking status after loading metrics
             await checkGoalStatus()
         } catch {
@@ -244,6 +287,7 @@ final class DashboardViewModel {
             currentSteps = results.steps
             currentActiveEnergy = results.activeEnergy
             currentExerciseMinutes = results.exerciseMinutes
+            scheduleTimeUnlockIfNeeded()
             // Check and update blocking status after loading metrics
             await checkGoalStatus()
         } catch {
@@ -254,6 +298,57 @@ final class DashboardViewModel {
     /// Clears the current error message.
     func dismissError() {
         errorMessage = nil
+    }
+    
+    /// Adds a new goal of the specified type with the given target value.
+    /// **Why update and reload?** Adding a goal enables it in the model, saves to disk,
+    /// and then fetches fresh health data for that newly enabled goal.
+    /// - Parameters:
+    ///   - type: The type of goal to add.
+    ///   - target: The target value for the goal.
+    func addGoal(type: GoalType, target: Double) async {
+        switch type {
+        case .steps:
+            healthGoal.stepGoal.isEnabled = true
+            healthGoal.stepGoal.target = Int(target)
+        case .activeEnergy:
+            healthGoal.activeEnergyGoal.isEnabled = true
+            healthGoal.activeEnergyGoal.target = Int(target)
+        case .exercise:
+            healthGoal.exerciseGoal.isEnabled = true
+            healthGoal.exerciseGoal.targetMinutes = Int(target)
+        case .timeUnlock:
+            healthGoal.timeBlockGoal.isEnabled = true
+            healthGoal.timeBlockGoal.unlockTimeMinutes = Int(target)
+        }
+        
+        HealthGoal.save(healthGoal)
+        isShowingAddGoal = false
+        
+        // Reload to fetch data for the newly added goal
+        await loadGoals()
+    }
+    
+    /// Removes a goal of the specified type.
+    /// **Why save and check status?** Removing a goal disables it in the model,
+    /// persists the change, and recalculates whether apps should be blocked.
+    /// - Parameter type: The type of goal to remove.
+    func removeGoal(type: GoalType) async {
+        switch type {
+        case .steps:
+            healthGoal.stepGoal.isEnabled = false
+        case .activeEnergy:
+            healthGoal.activeEnergyGoal.isEnabled = false
+        case .exercise:
+            healthGoal.exerciseGoal.isEnabled = false
+        case .timeUnlock:
+            healthGoal.timeBlockGoal.isEnabled = false
+        }
+        
+        HealthGoal.save(healthGoal)
+        
+        // Re-check blocking status after removing a goal
+        await checkGoalStatus()
     }
     
     // MARK: - Private Methods
@@ -310,6 +405,34 @@ final class DashboardViewModel {
     /// goal, even if the user changes it in Settings without restarting the app.
     private func refreshGoalFromStorage() {
         healthGoal = HealthGoal.load()
+        scheduleTimeUnlockIfNeeded()
+    }
+
+    private func scheduleTimeUnlockIfNeeded() {
+        timeUnlockTask?.cancel()
+
+        guard healthGoal.timeBlockGoal.isEnabled else { return }
+
+        let now = Date()
+        let unlockDate = healthGoal.timeBlockGoal.unlockDate(on: now)
+        guard unlockDate > now else { return }
+
+        let interval = unlockDate.timeIntervalSince(now)
+        timeUnlockTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(interval))
+            } catch {
+                return
+            }
+
+            guard !Task.isCancelled, let self else { return }
+            await self.checkGoalStatus()
+        }
+    }
+
+    private func currentMinutesSinceMidnight(date: Date = Date()) -> Int {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+        return (components.hour ?? 0) * 60 + (components.minute ?? 0)
     }
 
     private func fetchEnabledGoals() async throws -> (steps: Int, activeEnergy: Double, exerciseMinutes: Int) {
@@ -375,6 +498,8 @@ final class DashboardViewModel {
                     results.activeEnergy = value
                 case .exercise:
                     results.exerciseMinutes = Int(value)
+                case .timeUnlock:
+                    break // Time-based goals don't fetch from HealthKit
                 }
             }
         }
