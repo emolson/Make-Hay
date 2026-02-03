@@ -34,6 +34,9 @@ struct DashboardView: View {
     /// or multitasking scenarios where the app may foreground/background quickly.
     @State private var scenePhaseTask: Task<Void, Never>?
     
+    /// Tracks the goal currently being edited (nil when not editing).
+    @State private var editingGoal: GoalProgress?
+    
     // MARK: - Initialization
     
     /// Creates a DashboardView with the specified ViewModel.
@@ -62,6 +65,9 @@ struct DashboardView: View {
                 }
                 .sheet(isPresented: $viewModel.isShowingAddGoal) {
                     AddGoalView(viewModel: viewModel)
+                }
+                .sheet(item: $editingGoal) { goal in
+                    editGoalSheet(for: goal)
                 }
                 .task {
                     await viewModel.onAppear()
@@ -210,21 +216,41 @@ struct DashboardView: View {
     }
     
     private func goalSummaryRow(_ progress: GoalProgress) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: progress.type.iconName)
-                .foregroundStyle(ringColor(for: progress.type))
-            
-            Text(progress.type.displayName)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            
-            Spacer()
-            
-            Text("\(formattedCurrentValue(for: progress, includeUnit: true)) / \(formattedTargetValue(for: progress))")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+        Button {
+            editingGoal = progress
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: progress.exerciseType?.iconName ?? progress.type.iconName)
+                    .foregroundStyle(ringColor(for: progress.type))
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(progress.type.displayName)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                    
+                    // Show exercise type for exercise goals
+                    if let exerciseType = progress.exerciseType, exerciseType != .any {
+                        Text(exerciseType.displayName)
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                
+                Spacer()
+                
+                Text("\(formattedCurrentValue(for: progress, includeUnit: true)) / \(formattedTargetValue(for: progress))")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                
+                // Chevron to indicate tappable row
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
         }
-        .accessibilityIdentifier("goalSummaryRow.\(progress.type.rawValue)")
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("goalSummaryRow.\(progress.id)")
+        .accessibilityHint(String(localized: "Tap to edit goal"))
     }
     
     private func formattedCurrentValue(for progress: GoalProgress, includeUnit: Bool) -> String {
@@ -334,10 +360,52 @@ struct DashboardView: View {
                     goalSummaryRow(progress)
                 }
                 
-                Text(String(localized: "Unlocks when: \(viewModel.healthGoal.blockingStrategy.displayName)"))
-                    .font(.subheadline)
-                    .foregroundStyle(.tertiary)
+                // Blocking strategy picker
+                blockingStrategyPicker
             }
+        }
+    }
+    
+    /// Picker for selecting the blocking strategy (any vs all goals).
+    /// **Why here?** The blocking strategy is tightly coupled to goal logic,
+    /// so it belongs in the Dashboard near the goals rather than buried in Settings.
+    private var blockingStrategyPicker: some View {
+        Picker(String(localized: "Unlock when"), selection: Binding(
+            get: { viewModel.healthGoal.blockingStrategy },
+            set: { newValue in
+                Task {
+                    await viewModel.updateBlockingStrategy(newValue)
+                }
+            }
+        )) {
+            ForEach(BlockingStrategy.allCases) { strategy in
+                Text(strategy.displayName).tag(strategy)
+            }
+        }
+        .pickerStyle(.segmented)
+        .padding(.top, 8)
+        .accessibilityIdentifier("blockingStrategyPicker")
+    }
+    
+    /// Creates an edit sheet for the specified goal progress.
+    /// **Why a separate method?** Extracts the complexity of finding the exercise goal
+    /// and constructing the proper edit mode from the sheet modifier.
+    @ViewBuilder
+    private func editGoalSheet(for progress: GoalProgress) -> some View {
+        let exerciseGoal: ExerciseGoal? = {
+            if progress.type == .exercise, let id = progress.exerciseGoalId {
+                return viewModel.healthGoal.exerciseGoals.first { $0.id == id }
+            }
+            return nil
+        }()
+        
+        NavigationStack {
+            GoalConfigurationView(
+                viewModel: viewModel,
+                goalType: progress.type,
+                mode: .edit(exerciseGoalId: progress.exerciseGoalId),
+                exerciseGoal: exerciseGoal
+            )
         }
     }
     

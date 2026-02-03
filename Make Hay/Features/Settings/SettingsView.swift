@@ -7,11 +7,8 @@
 
 import SwiftUI
 
-/// The settings view where users can configure their goals and app preferences.
-///
-/// **Why use @AppStorage?** This provides automatic persistence to UserDefaults,
-/// ensuring the user's goal preference survives app restarts without requiring
-/// a dedicated persistence layer for simple key-value data.
+/// The settings view where users can configure app permissions and blocked apps.
+/// Goals are managed in the Dashboard for a unified experience.
 struct SettingsView: View {
     
     // MARK: - Dependencies
@@ -23,12 +20,6 @@ struct SettingsView: View {
     let blockerService: any BlockerServiceProtocol
     
     // MARK: - State
-    
-    /// Stored health goal data as JSON.
-    @AppStorage(HealthGoal.storageKey) private var healthGoalData: String = ""
-    
-    /// The user's full goal configuration.
-    @State private var healthGoal: HealthGoal = HealthGoal.load()
     
     /// Debug state for manually forcing app blocking on/off.
     /// Persisted to survive app restarts during testing sessions.
@@ -51,49 +42,11 @@ struct SettingsView: View {
     /// Tracks the current Screen Time authorization status for display.
     @State private var screenTimeAuthorized: Bool = false
     
-    /// The minimum step goal allowed.
-    private let minimumStepGoal: Int = 1_000
-    
-    /// The maximum step goal allowed.
-    private let maximumStepGoal: Int = 50_000
-    
-    /// The increment/decrement step size for the stepper.
-    private let stepIncrement: Int = 500
-    
-    /// The minimum active energy goal allowed (kcal).
-    private let minimumActiveEnergy: Int = 50
-    
-    /// The maximum active energy goal allowed (kcal).
-    private let maximumActiveEnergy: Int = 2_000
-    
-    /// The increment for active energy (kcal).
-    private let activeEnergyIncrement: Int = 25
-    
-    /// The minimum exercise minutes goal allowed.
-    private let minimumExerciseMinutes: Int = 5
-    
-    /// The maximum exercise minutes goal allowed.
-    private let maximumExerciseMinutes: Int = 180
-    
-    /// The increment for exercise minutes.
-    private let exerciseMinuteIncrement: Int = 5
-
-    /// Binding for the time-based unlock picker.
-    private var timeUnlockBinding: Binding<Date> {
-        Binding(
-            get: { healthGoal.timeBlockGoal.unlockDate() },
-            set: { newValue in
-                healthGoal.timeBlockGoal.setUnlockTime(newValue)
-            }
-        )
-    }
-    
     // MARK: - Body
     
     var body: some View {
         NavigationStack {
             List {
-                goalSection
                 blockedAppsSection
                 permissionsSection
                 debugSection
@@ -101,13 +54,9 @@ struct SettingsView: View {
             .navigationTitle(String(localized: "Settings"))
             .task {
                 await refreshPermissionStatus()
-                loadGoalFromStorage()
             }
             .refreshable {
                 await refreshPermissionStatus()
-            }
-            .onChange(of: healthGoal) { _, newValue in
-                persistGoal(newValue)
             }
             .alert(
                 String(localized: "Blocking Error"),
@@ -221,147 +170,6 @@ struct SettingsView: View {
         }
     }
     
-    private var goalSection: some View {
-        Section {
-            VStack(alignment: .leading, spacing: 12) {
-                goalToggleRow(
-                    icon: "figure.walk",
-                    title: String(localized: "Steps"),
-                    subtitle: String(localized: "Track daily steps")
-                ) {
-                    Toggle(isOn: $healthGoal.stepGoal.isEnabled) { EmptyView() }
-                        .labelsHidden()
-                        .accessibilityIdentifier("toggleStepsGoal")
-                }
-                
-                if healthGoal.stepGoal.isEnabled {
-                    goalValueDisplay(
-                        value: healthGoal.stepGoal.target.formatted(.number),
-                        unit: String(localized: "steps")
-                    )
-                    
-                    Stepper(
-                        value: $healthGoal.stepGoal.target,
-                        in: minimumStepGoal...maximumStepGoal,
-                        step: stepIncrement
-                    ) {
-                        Text(String(localized: "Adjust by \(stepIncrement.formatted())"))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .accessibilityIdentifier("stepGoalStepper")
-                }
-                
-                Divider().padding(.vertical, 6)
-                
-                goalToggleRow(
-                    icon: "flame",
-                    title: String(localized: "Active Energy"),
-                    subtitle: String(localized: "Calories burned")
-                ) {
-                    Toggle(isOn: $healthGoal.activeEnergyGoal.isEnabled) { EmptyView() }
-                        .labelsHidden()
-                        .accessibilityIdentifier("toggleActiveEnergyGoal")
-                }
-                
-                if healthGoal.activeEnergyGoal.isEnabled {
-                    goalValueDisplay(
-                        value: healthGoal.activeEnergyGoal.target.formatted(.number),
-                        unit: String(localized: "kcal")
-                    )
-                    
-                    Stepper(
-                        value: $healthGoal.activeEnergyGoal.target,
-                        in: minimumActiveEnergy...maximumActiveEnergy,
-                        step: activeEnergyIncrement
-                    ) {
-                        Text(String(localized: "Adjust by \(activeEnergyIncrement.formatted())"))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .accessibilityIdentifier("activeEnergyGoalStepper")
-                }
-                
-                Divider().padding(.vertical, 6)
-                
-                goalToggleRow(
-                    icon: "figure.run",
-                    title: String(localized: "Exercise"),
-                    subtitle: String(localized: "Minutes of movement")
-                ) {
-                    Toggle(isOn: $healthGoal.exerciseGoal.isEnabled) { EmptyView() }
-                        .labelsHidden()
-                        .accessibilityIdentifier("toggleExerciseGoal")
-                }
-                
-                if healthGoal.exerciseGoal.isEnabled {
-                    goalValueDisplay(
-                        value: healthGoal.exerciseGoal.targetMinutes.formatted(.number),
-                        unit: String(localized: "min")
-                    )
-                    
-                    Stepper(
-                        value: $healthGoal.exerciseGoal.targetMinutes,
-                        in: minimumExerciseMinutes...maximumExerciseMinutes,
-                        step: exerciseMinuteIncrement
-                    ) {
-                        Text(String(localized: "Adjust by \(exerciseMinuteIncrement.formatted())"))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .accessibilityIdentifier("exerciseGoalStepper")
-                    
-                    Picker(String(localized: "Exercise Type"), selection: $healthGoal.exerciseGoal.exerciseType) {
-                        ForEach(ExerciseType.allCases) { type in
-                            Label(type.displayName, systemImage: type.iconName).tag(type)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .padding(.top, 12)
-                    .accessibilityIdentifier("exerciseTypePicker")
-                }
-
-                Divider().padding(.vertical, 6)
-
-                goalToggleRow(
-                    icon: "clock",
-                    title: String(localized: "Time Lock"),
-                    subtitle: String(localized: "Block apps until a set time")
-                ) {
-                    Toggle(isOn: $healthGoal.timeBlockGoal.isEnabled) { EmptyView() }
-                        .labelsHidden()
-                        .accessibilityIdentifier("toggleTimeBlockGoal")
-                }
-
-                if healthGoal.timeBlockGoal.isEnabled {
-                    timeGoalValueDisplay(time: formattedUnlockTime)
-
-                    DatePicker(
-                        String(localized: "Unlock Time"),
-                        selection: timeUnlockBinding,
-                        displayedComponents: .hourAndMinute
-                    )
-                    .datePickerStyle(.compact)
-                    .accessibilityIdentifier("timeUnlockPicker")
-                }
-                
-                Divider().padding(.vertical, 6)
-                
-                Picker(String(localized: "Unlock Apps When"), selection: $healthGoal.blockingStrategy) {
-                    ForEach(BlockingStrategy.allCases) { strategy in
-                        Text(strategy.displayName).tag(strategy)
-                    }
-                }
-                .accessibilityIdentifier("blockingStrategyPicker")
-            }
-            .padding(.vertical, 8)
-        } header: {
-            Text(String(localized: "Goals"))
-        } footer: {
-            Text(String(localized: "Select the goals you want to complete to unlock your apps."))
-        }
-    }
-    
     private var blockedAppsSection: some View {
         Section {
             AppPickerView(blockerService: blockerService)
@@ -425,76 +233,6 @@ struct SettingsView: View {
             Text(String(localized: "⚠️ This only works on a physical device. FamilyControls does not function in the iOS Simulator."))
                 .foregroundStyle(.orange)
         }
-    }
-    
-    // MARK: - Goal Helpers
-    
-    @ViewBuilder
-    private func goalToggleRow(
-        icon: String,
-        title: String,
-        subtitle: String,
-        @ViewBuilder toggle: () -> some View
-    ) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.title2)
-                .foregroundStyle(.tint)
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.headline)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            
-            Spacer()
-            toggle()
-        }
-    }
-    
-    private func goalValueDisplay(value: String, unit: String) -> some View {
-        HStack(spacing: 6) {
-            Text(value)
-                .font(.system(size: 28, weight: .bold, design: .rounded))
-                .contentTransition(.numericText())
-            Text(unit)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .accessibilityIdentifier("goalValueDisplay")
-    }
-
-    private func timeGoalValueDisplay(time: String) -> some View {
-        HStack(spacing: 6) {
-            Text(time)
-                .font(.system(size: 28, weight: .bold, design: .rounded))
-            Text(String(localized: "unlock time"))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .accessibilityIdentifier("timeGoalValueDisplay")
-    }
-
-    private var formattedUnlockTime: String {
-        healthGoal.timeBlockGoal.unlockDate().formatted(date: .omitted, time: .shortened)
-    }
-    
-    private func loadGoalFromStorage() {
-        if let decoded = HealthGoal.decode(from: healthGoalData) {
-            healthGoal = decoded
-        } else {
-            healthGoal = HealthGoal.load()
-            persistGoal(healthGoal)
-        }
-    }
-    
-    private func persistGoal(_ goal: HealthGoal) {
-        healthGoalData = HealthGoal.encode(goal) ?? ""
-        HealthGoal.save(goal)
     }
     
     // MARK: - Health Permission Display

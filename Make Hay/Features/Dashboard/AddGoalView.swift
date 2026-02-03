@@ -179,22 +179,30 @@ extension GoalType {
 // MARK: - Preview
 
 #Preview("With Available Goals") {
+    AddGoalView(viewModel: makeAvailableGoalsPreviewViewModel())
+}
+
+#Preview("All Goals Added") {
+    AddGoalView(viewModel: makeAllGoalsPreviewViewModel())
+}
+
+private func makeAvailableGoalsPreviewViewModel() -> DashboardViewModel {
     let mock = MockHealthService()
     let viewModel = DashboardViewModel(healthService: mock, blockerService: MockBlockerService())
     // Disable some goals to make them available to add
     viewModel.healthGoal.activeEnergyGoal.isEnabled = false
-    viewModel.healthGoal.exerciseGoal.isEnabled = false
+    viewModel.healthGoal.exerciseGoals.removeAll()
     viewModel.healthGoal.timeBlockGoal.isEnabled = false
-    return AddGoalView(viewModel: viewModel)
+    return viewModel
 }
 
-#Preview("All Goals Added") {
+private func makeAllGoalsPreviewViewModel() -> DashboardViewModel {
     let mock = MockHealthService()
     let viewModel = DashboardViewModel(healthService: mock, blockerService: MockBlockerService())
     // Enable all goals
     viewModel.healthGoal.stepGoal.isEnabled = true
     viewModel.healthGoal.activeEnergyGoal.isEnabled = true
-    viewModel.healthGoal.exerciseGoal.isEnabled = true
+    viewModel.healthGoal.exerciseGoals = [ExerciseGoal(isEnabled: true, targetMinutes: 30, exerciseType: .any)]
     viewModel.healthGoal.timeBlockGoal.isEnabled = true
-    return AddGoalView(viewModel: viewModel)
+    return viewModel
 }

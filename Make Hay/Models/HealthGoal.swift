@@ -14,8 +14,8 @@ struct HealthGoal: Codable, Sendable, Equatable {
     var stepGoal: StepGoal = .init()
     /// The user's active energy goal configuration.
     var activeEnergyGoal: ActiveEnergyGoal = .init()
-    /// The user's exercise goal configuration.
-    var exerciseGoal: ExerciseGoal = .init()
+    /// The user's exercise goal configurations (supports multiple exercise types).
+    var exerciseGoals: [ExerciseGoal] = []
     /// The user's time-based unlock goal configuration.
     var timeBlockGoal: TimeBlockGoal = .init()
     /// Strategy for determining when goals unlock apps.
@@ -35,8 +35,9 @@ struct ActiveEnergyGoal: Codable, Sendable, Equatable {
 }
 
 /// Configuration for an exercise minutes goal.
-struct ExerciseGoal: Codable, Sendable, Equatable {
-    var isEnabled: Bool = false
+struct ExerciseGoal: Codable, Sendable, Equatable, Identifiable {
+    var id: UUID = UUID()
+    var isEnabled: Bool = true
     var targetMinutes: Int = 30
     var exerciseType: ExerciseType = .any
 }

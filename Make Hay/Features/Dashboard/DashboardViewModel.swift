@@ -64,8 +64,17 @@ struct GoalProgress: Identifiable, Sendable, Equatable {
     let target: Double
     let progress: Double
     let isMet: Bool
+    /// Optional ID for exercise goals to distinguish between multiple exercise goals.
+    let exerciseGoalId: UUID?
+    /// Optional exercise type label for display purposes.
+    let exerciseType: ExerciseType?
     
-    var id: GoalType { type }
+    var id: String {
+        if let exerciseGoalId {
+            return "\(type.rawValue)_\(exerciseGoalId.uuidString)"
+        }
+        return type.rawValue
+    }
 }
 
 /// ViewModel for the Dashboard feature, managing health data state and user interactions.
@@ -86,7 +95,8 @@ final class DashboardViewModel {
     var currentActiveEnergy: Double = 0
     
     /// The current exercise minutes fetched from HealthKit.
-    var currentExerciseMinutes: Int = 0
+    /// Stores exercise minutes by goal ID.
+    var currentExerciseMinutes: [UUID: Int] = [:]
     
     /// The user's goal configuration, refreshed from storage on appearance.
     var healthGoal: HealthGoal = HealthGoal.load()
@@ -121,9 +131,17 @@ final class DashboardViewModel {
     /// Returns goal types that are available to be added (not currently enabled).
     /// **Why this matters?** Prevents users from adding duplicate goals and provides
     /// a clean way to determine which options to show in the AddGoalView.
+    /// **Note:** Exercise goals can be added multiple times.
     var availableGoalTypes: [GoalType] {
         GoalType.allCases.filter { type in
-            !goalProgresses.contains { $0.type == type }
+            switch type {
+            case .exercise:
+                // Always allow adding exercise goals (supports multiple)
+                return true
+            default:
+                // Other goal types can only exist once
+                return !goalProgresses.contains { $0.type == type }
+            }
         }
     }
     
@@ -145,7 +163,9 @@ final class DashboardViewModel {
                 current: current,
                 target: target,
                 progress: progress,
-                isMet: currentSteps >= healthGoal.stepGoal.target
+                isMet: currentSteps >= healthGoal.stepGoal.target,
+                exerciseGoalId: nil,
+                exerciseType: nil
             ))
         }
         
@@ -157,20 +177,25 @@ final class DashboardViewModel {
                 current: currentActiveEnergy,
                 target: target,
                 progress: progress,
-                isMet: currentActiveEnergy >= Double(healthGoal.activeEnergyGoal.target)
+                isMet: currentActiveEnergy >= Double(healthGoal.activeEnergyGoal.target),
+                exerciseGoalId: nil,
+                exerciseType: nil
             ))
         }
         
-        if healthGoal.exerciseGoal.isEnabled {
-            let target = Double(max(healthGoal.exerciseGoal.targetMinutes, 1))
-            let current = Double(currentExerciseMinutes)
+        // Add progress for each enabled exercise goal
+        for exerciseGoal in healthGoal.exerciseGoals where exerciseGoal.isEnabled {
+            let target = Double(max(exerciseGoal.targetMinutes, 1))
+            let current = Double(currentExerciseMinutes[exerciseGoal.id] ?? 0)
             let progress = min(current / target, 1.0)
             items.append(GoalProgress(
                 type: .exercise,
                 current: current,
                 target: target,
                 progress: progress,
-                isMet: currentExerciseMinutes >= healthGoal.exerciseGoal.targetMinutes
+                isMet: current >= Double(exerciseGoal.targetMinutes),
+                exerciseGoalId: exerciseGoal.id,
+                exerciseType: exerciseGoal.exerciseType
             ))
         }
 
@@ -185,7 +210,9 @@ final class DashboardViewModel {
                 current: nowMinutes,
                 target: unlockMinutes,
                 progress: progress,
-                isMet: isMet
+                isMet: isMet,
+                exerciseGoalId: nil,
+                exerciseType: nil
             ))
         }
         
@@ -306,7 +333,8 @@ final class DashboardViewModel {
     /// - Parameters:
     ///   - type: The type of goal to add.
     ///   - target: The target value for the goal.
-    func addGoal(type: GoalType, target: Double) async {
+    ///   - exerciseType: The exercise type (only used for exercise goals).
+    func addGoal(type: GoalType, target: Double, exerciseType: ExerciseType = .any) async {
         switch type {
         case .steps:
             healthGoal.stepGoal.isEnabled = true
@@ -315,8 +343,12 @@ final class DashboardViewModel {
             healthGoal.activeEnergyGoal.isEnabled = true
             healthGoal.activeEnergyGoal.target = Int(target)
         case .exercise:
-            healthGoal.exerciseGoal.isEnabled = true
-            healthGoal.exerciseGoal.targetMinutes = Int(target)
+            let newExerciseGoal = ExerciseGoal(
+                isEnabled: true,
+                targetMinutes: Int(target),
+                exerciseType: exerciseType
+            )
+            healthGoal.exerciseGoals.append(newExerciseGoal)
         case .timeUnlock:
             healthGoal.timeBlockGoal.isEnabled = true
             healthGoal.timeBlockGoal.unlockTimeMinutes = Int(target)
@@ -332,15 +364,19 @@ final class DashboardViewModel {
     /// Removes a goal of the specified type.
     /// **Why save and check status?** Removing a goal disables it in the model,
     /// persists the change, and recalculates whether apps should be blocked.
-    /// - Parameter type: The type of goal to remove.
-    func removeGoal(type: GoalType) async {
+    /// - Parameters:
+    ///   - type: The type of goal to remove.
+    ///   - exerciseGoalId: The ID of the exercise goal to remove (only used for exercise goals).
+    func removeGoal(type: GoalType, exerciseGoalId: UUID? = nil) async {
         switch type {
         case .steps:
             healthGoal.stepGoal.isEnabled = false
         case .activeEnergy:
             healthGoal.activeEnergyGoal.isEnabled = false
         case .exercise:
-            healthGoal.exerciseGoal.isEnabled = false
+            if let exerciseGoalId {
+                healthGoal.exerciseGoals.removeAll { $0.id == exerciseGoalId }
+            }
         case .timeUnlock:
             healthGoal.timeBlockGoal.isEnabled = false
         }
@@ -348,6 +384,42 @@ final class DashboardViewModel {
         HealthGoal.save(healthGoal)
         
         // Re-check blocking status after removing a goal
+        await checkGoalStatus()
+    }
+    
+    /// Updates an existing goal's target value.
+    /// **Why separate from addGoal?** Updating a goal should not dismiss sheets or
+    /// re-fetch all health data unnecessarily. It only persists the new target.
+    /// - Parameters:
+    ///   - type: The type of goal to update.
+    ///   - target: The new target value for the goal.
+    ///   - exerciseGoalId: The ID of the exercise goal to update (only used for exercise goals).
+    ///   - exerciseType: The new exercise type (only used for exercise goals).
+    func updateGoal(type: GoalType, target: Double, exerciseGoalId: UUID? = nil, exerciseType: ExerciseType = .any) {
+        switch type {
+        case .steps:
+            healthGoal.stepGoal.target = Int(target)
+        case .activeEnergy:
+            healthGoal.activeEnergyGoal.target = Int(target)
+        case .exercise:
+            if let exerciseGoalId,
+               let index = healthGoal.exerciseGoals.firstIndex(where: { $0.id == exerciseGoalId }) {
+                healthGoal.exerciseGoals[index].targetMinutes = Int(target)
+                healthGoal.exerciseGoals[index].exerciseType = exerciseType
+            }
+        case .timeUnlock:
+            healthGoal.timeBlockGoal.unlockTimeMinutes = Int(target)
+        }
+        
+        HealthGoal.save(healthGoal)
+    }
+    
+    /// Updates the blocking strategy.
+    /// **Why async?** After changing the strategy, we need to recalculate whether
+    /// apps should be blocked based on the new logic (any vs all).
+    func updateBlockingStrategy(_ strategy: BlockingStrategy) async {
+        healthGoal.blockingStrategy = strategy
+        HealthGoal.save(healthGoal)
         await checkGoalStatus()
     }
     
@@ -371,7 +443,7 @@ final class DashboardViewModel {
             // and checkGoalStatus() will re-engage blocking if needed
             currentSteps = 0
             currentActiveEnergy = 0
-            currentExerciseMinutes = 0
+            currentExerciseMinutes = [:]
         }
     }
     
@@ -435,22 +507,22 @@ final class DashboardViewModel {
         return (components.hour ?? 0) * 60 + (components.minute ?? 0)
     }
 
-    private func fetchEnabledGoals() async throws -> (steps: Int, activeEnergy: Double, exerciseMinutes: Int) {
-        var results = (steps: 0, activeEnergy: 0.0, exerciseMinutes: 0)
+    private func fetchEnabledGoals() async throws -> (steps: Int, activeEnergy: Double, exerciseMinutes: [UUID: Int]) {
+        var results = (steps: 0, activeEnergy: 0.0, exerciseMinutes: [UUID: Int]())
         var authorizationError: Error?
         
-        await withTaskGroup(of: (GoalType, Double, Error?).self) { group in
+        await withTaskGroup(of: (GoalType, Double, UUID?, Error?).self) { group in
             if healthGoal.stepGoal.isEnabled {
                 group.addTask {
                     do {
                         let steps = try await self.healthService.fetchDailySteps()
-                        return (.steps, Double(steps), nil)
+                        return (.steps, Double(steps), nil, nil)
                     } catch {
                         // Only propagate authorization errors, treat missing data as 0
                         if case HealthServiceError.authorizationDenied = error {
-                            return (.steps, 0, error)
+                            return (.steps, 0, nil, error)
                         }
-                        return (.steps, 0, nil)
+                        return (.steps, 0, nil, nil)
                     }
                 }
             }
@@ -459,34 +531,36 @@ final class DashboardViewModel {
                 group.addTask {
                     do {
                         let energy = try await self.healthService.fetchActiveEnergy()
-                        return (.activeEnergy, energy, nil)
+                        return (.activeEnergy, energy, nil, nil)
                     } catch {
                         // Only propagate authorization errors, treat missing data as 0
                         if case HealthServiceError.authorizationDenied = error {
-                            return (.activeEnergy, 0, error)
+                            return (.activeEnergy, 0, nil, error)
                         }
-                        return (.activeEnergy, 0, nil)
+                        return (.activeEnergy, 0, nil, nil)
                     }
                 }
             }
             
-            if healthGoal.exerciseGoal.isEnabled {
-                let activityType = healthGoal.exerciseGoal.exerciseType.hkWorkoutActivityType
+            // Fetch data for each enabled exercise goal
+            for exerciseGoal in healthGoal.exerciseGoals where exerciseGoal.isEnabled {
+                let goalId = exerciseGoal.id
+                let activityType = exerciseGoal.exerciseType.hkWorkoutActivityType
                 group.addTask {
                     do {
                         let minutes = try await self.healthService.fetchExerciseMinutes(for: activityType)
-                        return (.exercise, Double(minutes), nil)
+                        return (.exercise, Double(minutes), goalId, nil)
                     } catch {
                         // Only propagate authorization errors, treat missing data as 0
                         if case HealthServiceError.authorizationDenied = error {
-                            return (.exercise, 0, error)
+                            return (.exercise, 0, goalId, error)
                         }
-                        return (.exercise, 0, nil)
+                        return (.exercise, 0, goalId, nil)
                     }
                 }
             }
             
-            for await (type, value, error) in group {
+            for await (type, value, goalId, error) in group {
                 if let error = error {
                     authorizationError = error
                 }
@@ -497,7 +571,9 @@ final class DashboardViewModel {
                 case .activeEnergy:
                     results.activeEnergy = value
                 case .exercise:
-                    results.exerciseMinutes = Int(value)
+                    if let goalId {
+                        results.exerciseMinutes[goalId] = Int(value)
+                    }
                 case .timeUnlock:
                     break // Time-based goals don't fetch from HealthKit
                 }

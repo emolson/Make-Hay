@@ -7,8 +7,26 @@
 
 import SwiftUI
 
+/// Represents the mode of the GoalConfigurationView.
+/// **Why an enum?** Distinguishes between adding a new goal and editing an existing one,
+/// allowing the view to adapt its UI (button labels, remove option) accordingly.
+enum GoalConfigurationMode: Equatable {
+    case add
+    case edit(exerciseGoalId: UUID?)
+    
+    var isEditing: Bool {
+        if case .edit = self { return true }
+        return false
+    }
+    
+    var exerciseGoalId: UUID? {
+        if case .edit(let id) = self { return id }
+        return nil
+    }
+}
+
 /// View for configuring a specific goal type's target value.
-/// Provides appropriate input controls for each goal type.
+/// Supports both adding new goals and editing existing ones.
 ///
 /// **Why separate configuration view?** Each goal type has different units and constraints
 /// (steps vs. calories vs. time). This view adapts its interface based on the goal type.
@@ -22,37 +40,61 @@ struct GoalConfigurationView: View {
     
     @State private var viewModel: DashboardViewModel
     let goalType: GoalType
+    let mode: GoalConfigurationMode
     
     @State private var targetValue: Double
     @State private var selectedExerciseType: ExerciseType = .any
     @State private var unlockTime: Date
     @State private var isSaving: Bool = false
     @State private var triggerSuccessHaptic: Bool = false
+    @State private var showingRemoveConfirmation: Bool = false
     
     // MARK: - Initialization
     
-    /// Creates a GoalConfigurationView for the specified goal type.
+    /// Creates a GoalConfigurationView for adding a new goal.
     /// Pre-fills with existing values if the goal was previously configured.
     /// - Parameters:
     ///   - viewModel: The ViewModel managing dashboard state.
     ///   - goalType: The type of goal being configured.
     init(viewModel: DashboardViewModel, goalType: GoalType) {
+        self.init(viewModel: viewModel, goalType: goalType, mode: .add)
+    }
+    
+    /// Creates a GoalConfigurationView for adding or editing a goal.
+    /// - Parameters:
+    ///   - viewModel: The ViewModel managing dashboard state.
+    ///   - goalType: The type of goal being configured.
+    ///   - mode: Whether adding a new goal or editing an existing one.
+    ///   - exerciseGoal: The specific exercise goal being edited (for exercise goals only).
+    init(viewModel: DashboardViewModel, goalType: GoalType, mode: GoalConfigurationMode, exerciseGoal: ExerciseGoal? = nil) {
         _viewModel = State(initialValue: viewModel)
         self.goalType = goalType
+        self.mode = mode
         
         // Initialize unlockTime with a default (only used for .timeUnlock goals)
         let defaultUnlockTime = viewModel.healthGoal.timeBlockGoal.unlockDate()
         _unlockTime = State(initialValue: defaultUnlockTime)
         
-        // Pre-fill with existing values or smart defaults
+        // Pre-fill based on mode
         switch goalType {
         case .steps:
             _targetValue = State(initialValue: Double(viewModel.healthGoal.stepGoal.target))
         case .activeEnergy:
             _targetValue = State(initialValue: Double(viewModel.healthGoal.activeEnergyGoal.target))
         case .exercise:
-            _targetValue = State(initialValue: Double(viewModel.healthGoal.exerciseGoal.targetMinutes))
-            _selectedExerciseType = State(initialValue: viewModel.healthGoal.exerciseGoal.exerciseType)
+            if let exerciseGoal {
+                // Editing a specific exercise goal
+                _targetValue = State(initialValue: Double(exerciseGoal.targetMinutes))
+                _selectedExerciseType = State(initialValue: exerciseGoal.exerciseType)
+            } else if let lastExerciseGoal = viewModel.healthGoal.exerciseGoals.last {
+                // Adding new - use last exercise goal as template
+                _targetValue = State(initialValue: Double(lastExerciseGoal.targetMinutes))
+                _selectedExerciseType = State(initialValue: lastExerciseGoal.exerciseType)
+            } else {
+                // Default for first exercise goal
+                _targetValue = State(initialValue: 30)
+                _selectedExerciseType = State(initialValue: .any)
+            }
         case .timeUnlock:
             _targetValue = State(initialValue: Double(viewModel.healthGoal.timeBlockGoal.unlockTimeMinutes))
         }
@@ -88,8 +130,24 @@ struct GoalConfigurationView: View {
                     Text(String(localized: "Optionally filter to specific workout types"))
                 }
             }
+            
+            // Remove goal section (only shown in edit mode)
+            if mode.isEditing {
+                Section {
+                    Button(role: .destructive) {
+                        showingRemoveConfirmation = true
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Text(String(localized: "Remove Goal"))
+                            Spacer()
+                        }
+                    }
+                    .accessibilityIdentifier("removeGoalButton")
+                }
+            }
         }
-        .navigationTitle(goalType.displayName)
+        .navigationTitle(mode.isEditing ? String(localized: "Edit Goal") : goalType.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
@@ -97,16 +155,37 @@ struct GoalConfigurationView: View {
                     ProgressView()
                         .accessibilityIdentifier("savingIndicator")
                 } else {
-                    Button(String(localized: "Add")) {
+                    Button(mode.isEditing ? String(localized: "Save") : String(localized: "Add")) {
                         saveGoal()
                     }
                     .disabled(!isValidInput)
-                    .accessibilityIdentifier("addGoalConfirmButton")
+                    .accessibilityIdentifier(mode.isEditing ? "saveGoalButton" : "addGoalConfirmButton")
+                }
+            }
+            
+            if mode.isEditing {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(String(localized: "Cancel")) {
+                        dismiss()
+                    }
+                    .accessibilityIdentifier("cancelEditButton")
                 }
             }
         }
         .disabled(isSaving)
         .sensoryFeedback(.success, trigger: triggerSuccessHaptic)
+        .confirmationDialog(
+            String(localized: "Remove Goal"),
+            isPresented: $showingRemoveConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(String(localized: "Remove"), role: .destructive) {
+                removeGoal()
+            }
+            Button(String(localized: "Cancel"), role: .cancel) { }
+        } message: {
+            Text(String(localized: "Are you sure you want to remove this goal? This cannot be undone."))
+        }
     }
     
     // MARK: - View Components
@@ -214,16 +293,30 @@ struct GoalConfigurationView: View {
         isSaving = true
         
         Task {
-            // Update exercise type if applicable
-            if goalType == .exercise {
-                viewModel.healthGoal.exerciseGoal.exerciseType = selectedExerciseType
+            if mode.isEditing {
+                // Update existing goal
+                viewModel.updateGoal(
+                    type: goalType,
+                    target: targetValue,
+                    exerciseGoalId: mode.exerciseGoalId,
+                    exerciseType: selectedExerciseType
+                )
+            } else {
+                // Add new goal
+                await viewModel.addGoal(type: goalType, target: targetValue, exerciseType: selectedExerciseType)
             }
             
-            await viewModel.addGoal(type: goalType, target: targetValue)
             triggerSuccessHaptic = true
             
             // Small delay to let haptic play before dismissing
             try? await Task.sleep(for: .milliseconds(150))
+            dismiss()
+        }
+    }
+    
+    private func removeGoal() {
+        Task {
+            await viewModel.removeGoal(type: goalType, exerciseGoalId: mode.exerciseGoalId)
             dismiss()
         }
     }
@@ -249,7 +342,7 @@ extension GoalType {
 
 // MARK: - Preview
 
-#Preview("Steps Configuration") {
+#Preview("Steps Configuration - Add") {
     NavigationStack {
         GoalConfigurationView(
             viewModel: DashboardViewModel(healthService: MockHealthService(), blockerService: MockBlockerService()),
@@ -258,7 +351,17 @@ extension GoalType {
     }
 }
 
-#Preview("Exercise Configuration") {
+#Preview("Steps Configuration - Edit") {
+    NavigationStack {
+        GoalConfigurationView(
+            viewModel: DashboardViewModel(healthService: MockHealthService(), blockerService: MockBlockerService()),
+            goalType: .steps,
+            mode: .edit(exerciseGoalId: nil)
+        )
+    }
+}
+
+#Preview("Exercise Configuration - Add") {
     NavigationStack {
         GoalConfigurationView(
             viewModel: DashboardViewModel(healthService: MockHealthService(), blockerService: MockBlockerService()),
