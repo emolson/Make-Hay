@@ -295,7 +295,7 @@ struct GoalConfigurationView: View {
         Task {
             if mode.isEditing {
                 // Update existing goal
-                viewModel.updateGoal(
+                await viewModel.updateGoal(
                     type: goalType,
                     target: targetValue,
                     exerciseGoalId: mode.exerciseGoalId,

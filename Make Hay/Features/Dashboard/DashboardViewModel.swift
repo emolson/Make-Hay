@@ -395,7 +395,7 @@ final class DashboardViewModel {
     ///   - target: The new target value for the goal.
     ///   - exerciseGoalId: The ID of the exercise goal to update (only used for exercise goals).
     ///   - exerciseType: The new exercise type (only used for exercise goals).
-    func updateGoal(type: GoalType, target: Double, exerciseGoalId: UUID? = nil, exerciseType: ExerciseType = .any) {
+    func updateGoal(type: GoalType, target: Double, exerciseGoalId: UUID? = nil, exerciseType: ExerciseType = .any) async {
         switch type {
         case .steps:
             healthGoal.stepGoal.target = Int(target)
@@ -412,6 +412,10 @@ final class DashboardViewModel {
         }
         
         HealthGoal.save(healthGoal)
+        
+        // Ensure time-based goals are rescheduled and blocking status is refreshed
+        scheduleTimeUnlockIfNeeded()
+        await checkGoalStatus()
     }
     
     /// Updates the blocking strategy.
