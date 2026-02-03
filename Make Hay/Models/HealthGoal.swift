@@ -20,6 +20,59 @@ struct HealthGoal: Codable, Sendable, Equatable {
     var timeBlockGoal: TimeBlockGoal = .init()
     /// Strategy for determining when goals unlock apps.
     var blockingStrategy: BlockingStrategy = .any
+    
+    // MARK: - Pending Changes
+    
+    /// Pending goal changes scheduled to take effect tomorrow at midnight.
+    /// **Why separate type?** Avoids recursive value types while still persisting full state.
+    var pendingGoal: PendingHealthGoal?
+    
+    /// The date when pending changes should take effect (midnight of next day).
+    /// **Why Date?** Allows precise comparison to determine when to apply changes.
+    var pendingGoalEffectiveDate: Date?
+    
+    /// Applies pending goal changes if the effective date has passed.
+    /// **Why mutating?** This modifies the current goal state by copying pending values.
+    /// - Returns: True if pending changes were applied, false if no changes were pending or not yet effective.
+    @discardableResult
+    mutating func applyPendingIfReady() -> Bool {
+        guard let pendingGoal,
+              let effectiveDate = pendingGoalEffectiveDate,
+              Date() >= effectiveDate else {
+            return false
+        }
+        
+        // Apply all pending changes
+        self.stepGoal = pendingGoal.stepGoal
+        self.activeEnergyGoal = pendingGoal.activeEnergyGoal
+        self.exerciseGoals = pendingGoal.exerciseGoals
+        self.timeBlockGoal = pendingGoal.timeBlockGoal
+        self.blockingStrategy = pendingGoal.blockingStrategy
+        
+        // Clear pending state
+        self.pendingGoal = nil
+        self.pendingGoalEffectiveDate = nil
+        
+        return true
+    }
+}
+
+/// Snapshot of a goal change scheduled to apply later.
+/// Stores the full goal configuration without recursive references.
+struct PendingHealthGoal: Codable, Sendable, Equatable {
+    var stepGoal: StepGoal
+    var activeEnergyGoal: ActiveEnergyGoal
+    var exerciseGoals: [ExerciseGoal]
+    var timeBlockGoal: TimeBlockGoal
+    var blockingStrategy: BlockingStrategy
+    
+    init(from goal: HealthGoal) {
+        self.stepGoal = goal.stepGoal
+        self.activeEnergyGoal = goal.activeEnergyGoal
+        self.exerciseGoals = goal.exerciseGoals
+        self.timeBlockGoal = goal.timeBlockGoal
+        self.blockingStrategy = goal.blockingStrategy
+    }
 }
 
 /// Configuration for a steps goal.

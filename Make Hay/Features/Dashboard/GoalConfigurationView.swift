@@ -48,6 +48,8 @@ struct GoalConfigurationView: View {
     @State private var isSaving: Bool = false
     @State private var triggerSuccessHaptic: Bool = false
     @State private var showingRemoveConfirmation: Bool = false
+    @State private var showingPendingConfirmation: Bool = false
+    @State private var proposedGoal: HealthGoal?
     
     // MARK: - Initialization
     
@@ -186,6 +188,23 @@ struct GoalConfigurationView: View {
         } message: {
             Text(String(localized: "Are you sure you want to remove this goal? This cannot be undone."))
         }
+        .sheet(isPresented: $showingPendingConfirmation) {
+            if let proposedGoal {
+                PendingGoalChangeView {
+                    // Schedule for tomorrow
+                    viewModel.schedulePendingGoal(proposedGoal)
+                    dismiss()
+                } onEmergencyUnlock: {
+                    // Apply immediately via emergency unlock
+                    Task {
+                        await viewModel.applyEmergencyChange(proposedGoal)
+                        triggerSuccessHaptic = true
+                        try? await Task.sleep(for: .milliseconds(150))
+                        dismiss()
+                    }
+                }
+            }
+        }
     }
     
     // MARK: - View Components
@@ -293,24 +312,74 @@ struct GoalConfigurationView: View {
         isSaving = true
         
         Task {
+            // Build the proposed goal configuration
+            var newGoal = viewModel.healthGoal
+            
             if mode.isEditing {
                 // Update existing goal
-                await viewModel.updateGoal(
-                    type: goalType,
-                    target: targetValue,
-                    exerciseGoalId: mode.exerciseGoalId,
-                    exerciseType: selectedExerciseType
-                )
+                switch goalType {
+                case .steps:
+                    newGoal.stepGoal.target = Int(targetValue)
+                case .activeEnergy:
+                    newGoal.activeEnergyGoal.target = Int(targetValue)
+                case .exercise:
+                    if let exerciseGoalId = mode.exerciseGoalId,
+                       let index = newGoal.exerciseGoals.firstIndex(where: { $0.id == exerciseGoalId }) {
+                        newGoal.exerciseGoals[index].targetMinutes = Int(targetValue)
+                        newGoal.exerciseGoals[index].exerciseType = selectedExerciseType
+                    }
+                case .timeUnlock:
+                    newGoal.timeBlockGoal.unlockTimeMinutes = Int(targetValue)
+                }
             } else {
                 // Add new goal
-                await viewModel.addGoal(type: goalType, target: targetValue, exerciseType: selectedExerciseType)
+                switch goalType {
+                case .steps:
+                    newGoal.stepGoal.isEnabled = true
+                    newGoal.stepGoal.target = Int(targetValue)
+                case .activeEnergy:
+                    newGoal.activeEnergyGoal.isEnabled = true
+                    newGoal.activeEnergyGoal.target = Int(targetValue)
+                case .exercise:
+                    let newExerciseGoal = ExerciseGoal(
+                        isEnabled: true,
+                        targetMinutes: Int(targetValue),
+                        exerciseType: selectedExerciseType
+                    )
+                    newGoal.exerciseGoals.append(newExerciseGoal)
+                case .timeUnlock:
+                    newGoal.timeBlockGoal.isEnabled = true
+                    newGoal.timeBlockGoal.unlockTimeMinutes = Int(targetValue)
+                }
             }
             
-            triggerSuccessHaptic = true
+            // Determine the intent of this change
+            let intent = GoalChangeIntent.determine(original: viewModel.healthGoal, proposed: newGoal)
             
-            // Small delay to let haptic play before dismissing
-            try? await Task.sleep(for: .milliseconds(150))
-            dismiss()
+            // If making goal easier while apps are blocked, show confirmation
+            if intent == .easier && viewModel.isBlocking {
+                proposedGoal = newGoal
+                showingPendingConfirmation = true
+                isSaving = false
+            } else {
+                // Apply immediately for harder goals or when not blocking
+                if mode.isEditing {
+                    await viewModel.updateGoal(
+                        type: goalType,
+                        target: targetValue,
+                        exerciseGoalId: mode.exerciseGoalId,
+                        exerciseType: selectedExerciseType
+                    )
+                } else {
+                    await viewModel.addGoal(type: goalType, target: targetValue, exerciseType: selectedExerciseType)
+                }
+                
+                triggerSuccessHaptic = true
+                
+                // Small delay to let haptic play before dismissing
+                try? await Task.sleep(for: .milliseconds(150))
+                dismiss()
+            }
         }
     }
     

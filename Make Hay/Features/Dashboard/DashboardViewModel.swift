@@ -277,13 +277,15 @@ final class DashboardViewModel {
         // Check if it's a new day before loading steps
         checkForNewDay()
         
+        // Apply any pending goal changes that are now effective
+        refreshGoalFromStorage()
+        
         isLoading = true
         errorMessage = nil
         
         defer { isLoading = false }
         
         do {
-            refreshGoalFromStorage()
             let results = try await fetchEnabledGoals()
             currentSteps = results.steps
             currentActiveEnergy = results.activeEnergy
@@ -427,6 +429,50 @@ final class DashboardViewModel {
         await checkGoalStatus()
     }
     
+    /// Schedules a goal change to take effect at midnight tomorrow.
+    /// **Why tomorrow?** Removes the immediate gratification of lowering goals to bypass blocking.
+    /// The user can still adjust their goals, but won't unlock apps until they're truly earned.
+    /// - Parameter newGoal: The proposed goal configuration to apply tomorrow
+    func schedulePendingGoal(_ newGoal: HealthGoal) {
+        // Calculate midnight of tomorrow
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+        let midnightTomorrow = Calendar.current.startOfDay(for: tomorrow)
+        
+        healthGoal.pendingGoal = PendingHealthGoal(from: newGoal)
+        healthGoal.pendingGoalEffectiveDate = midnightTomorrow
+        HealthGoal.save(healthGoal)
+    }
+    
+    /// Applies an emergency goal change immediately, bypassing the next-day rule.
+    /// **Why async?** Must update blocking status immediately after applying the change.
+    /// - Parameter newGoal: The proposed goal configuration to apply now
+    func applyEmergencyChange(_ newGoal: HealthGoal) async {
+        // Apply the changes immediately
+        healthGoal.stepGoal = newGoal.stepGoal
+        healthGoal.activeEnergyGoal = newGoal.activeEnergyGoal
+        healthGoal.exerciseGoals = newGoal.exerciseGoals
+        healthGoal.timeBlockGoal = newGoal.timeBlockGoal
+        healthGoal.blockingStrategy = newGoal.blockingStrategy
+        
+        // Clear any pending changes since we're applying now
+        healthGoal.pendingGoal = nil
+        healthGoal.pendingGoalEffectiveDate = nil
+        
+        HealthGoal.save(healthGoal)
+        
+        // Update blocking status with the new goal
+        scheduleTimeUnlockIfNeeded()
+        await checkGoalStatus()
+    }
+    
+    /// Cancels any pending goal changes.
+    /// **Why expose this?** Allows users to change their mind before tomorrow arrives.
+    func cancelPendingGoal() {
+        healthGoal.pendingGoal = nil
+        healthGoal.pendingGoalEffectiveDate = nil
+        HealthGoal.save(healthGoal)
+    }
+    
     // MARK: - Private Methods
     
     /// Checks if a new day has started and resets the blocking state if necessary.
@@ -481,6 +527,12 @@ final class DashboardViewModel {
     /// goal, even if the user changes it in Settings without restarting the app.
     private func refreshGoalFromStorage() {
         healthGoal = HealthGoal.load()
+        
+        // Apply pending changes if the effective date has passed
+        if healthGoal.applyPendingIfReady() {
+            HealthGoal.save(healthGoal)
+        }
+        
         scheduleTimeUnlockIfNeeded()
     }
 

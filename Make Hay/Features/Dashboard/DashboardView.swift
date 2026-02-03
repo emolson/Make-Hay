@@ -126,6 +126,11 @@ struct DashboardView: View {
         VStack(spacing: 24) {
             Spacer()
             
+            // Pending goal change banner
+            if viewModel.healthGoal.pendingGoal != nil {
+                pendingChangeBanner
+            }
+            
             goalRings
             
             goalStatusText
@@ -441,6 +446,44 @@ struct DashboardView: View {
         }
         .buttonStyle(.bordered)
         .accessibilityIdentifier("refreshButton")
+    }
+    
+    /// Banner shown when a goal change is scheduled for tomorrow.
+    /// **Why show this?** Provides transparency about pending changes and allows cancellation.
+    private var pendingChangeBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "calendar.badge.clock")
+                .font(.title3)
+                .foregroundStyle(.blue)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(String(localized: "Goal Update Scheduled"))
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                
+                if let effectiveDate = viewModel.healthGoal.pendingGoalEffectiveDate {
+                    Text(String(localized: "Takes effect at \\(effectiveDate, style: .time)"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            
+            Spacer()
+            
+            Button {
+                viewModel.cancelPendingGoal()
+            } label: {
+                Text(String(localized: "Cancel"))
+                    .font(.caption)
+                    .fontWeight(.medium)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .accessibilityIdentifier("cancelPendingButton")
+        }
+        .padding()
+        .background(Color.blue.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityIdentifier("pendingChangeBanner")
     }
     
     private var errorView: some View {
