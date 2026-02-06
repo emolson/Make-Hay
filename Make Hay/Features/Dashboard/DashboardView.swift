@@ -462,7 +462,7 @@ struct DashboardView: View {
                     .fontWeight(.semibold)
                 
                 if let effectiveDate = viewModel.healthGoal.pendingGoalEffectiveDate {
-                    Text(String(localized: "Takes effect at \\(effectiveDate, style: .time)"))
+                    Text("Takes effect at \(effectiveDate, style: .time)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
