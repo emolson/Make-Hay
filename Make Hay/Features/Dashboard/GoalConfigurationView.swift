@@ -385,8 +385,32 @@ struct GoalConfigurationView: View {
     
     private func removeGoal() {
         Task {
-            await viewModel.removeGoal(type: goalType, exerciseGoalId: mode.exerciseGoalId)
-            dismiss()
+            // Build the proposed goal configuration with the goal removed
+            var newGoal = viewModel.healthGoal
+            switch goalType {
+            case .steps:
+                newGoal.stepGoal.isEnabled = false
+            case .activeEnergy:
+                newGoal.activeEnergyGoal.isEnabled = false
+            case .exercise:
+                if let exerciseGoalId = mode.exerciseGoalId {
+                    newGoal.exerciseGoals.removeAll { $0.id == exerciseGoalId }
+                }
+            case .timeUnlock:
+                newGoal.timeBlockGoal.isEnabled = false
+            }
+            
+            // Determine intent (removal is always "easier")
+            let intent = GoalChangeIntent.determine(original: viewModel.healthGoal, proposed: newGoal)
+            
+            // If removing while blocked, schedule for tomorrow or require emergency override
+            if intent == .easier && viewModel.isBlocking {
+                proposedGoal = newGoal
+                showingPendingConfirmation = true
+            } else {
+                await viewModel.removeGoal(type: goalType, exerciseGoalId: mode.exerciseGoalId)
+                dismiss()
+            }
         }
     }
 }
