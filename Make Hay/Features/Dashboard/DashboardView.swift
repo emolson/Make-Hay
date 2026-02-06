@@ -226,7 +226,9 @@ struct DashboardView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: progress.exerciseType?.iconName ?? progress.type.iconName)
+                    .font(.subheadline)
                     .foregroundStyle(ringColor(for: progress.type))
+                    .frame(width: 20, height: 20, alignment: .center)
                 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(progress.type.displayName)
