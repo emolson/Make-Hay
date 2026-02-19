@@ -10,86 +10,68 @@ import SwiftUI
 
 /// A view that presents the Family Activity Picker for selecting apps to block.
 ///
-/// **Why a separate view?** This encapsulates the FamilyActivityPicker logic and state,
-/// keeping SettingsView focused on layout. It also allows for easier testing and reuse.
+/// **Why a separate view?** Encapsulates picker presentation and layout,
+/// keeping `SettingsView` focused on section arrangement. All business logic
+/// (persistence, shield updates, haptic feedback) lives in `AppPickerViewModel`.
 ///
 /// **Note:** The `.familyActivityPicker` modifier does NOT render in the iOS Simulator.
 /// You must test this feature on a physical device with Family Controls capability enabled.
 struct AppPickerView: View {
-    
-    // MARK: - Properties
-    
-    /// The blocker service for persisting the app selection.
-    let blockerService: any BlockerServiceProtocol
-    
-    // MARK: - State
-    
-    /// Controls the presentation of the family activity picker sheet.
-    @State private var isPickerPresented: Bool = false
-    
-    /// The current app and category selection for blocking.
-    @State private var selection: FamilyActivitySelection = FamilyActivitySelection()
-    
-    /// Indicates if an error occurred while saving the selection.
-    @State private var showError: Bool = false
-    
-    /// The error message to display.
-    @State private var errorMessage: String = ""
-    
-    /// Indicates if the selection is being saved.
-    @State private var isSaving: Bool = false
-    
+
+    // MARK: - ViewModel
+
+    /// Owned by this view via `@StateObject` so the edit session survives SwiftUI re-renders.
+    @StateObject private var viewModel: AppPickerViewModel
+
+    // MARK: - Initialization
+
+    /// - Parameter blockerService: Injected service for persisting selections and managing shields.
+    init(blockerService: any BlockerServiceProtocol) {
+        _viewModel = StateObject(
+            wrappedValue: AppPickerViewModel(blockerService: blockerService)
+        )
+    }
+
     // MARK: - Body
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             selectionSummary
-            
-            HStack(spacing: 12) {
-                selectAppsButton
-                
-                if hasSelection {
-                    clearSelectionButton
-                }
-            }
+            pickerButton
         }
         .familyActivityPicker(
-            isPresented: $isPickerPresented,
-            selection: $selection
+            isPresented: $viewModel.isPickerPresented,
+            selection: $viewModel.draftSelection
         )
-        .onChange(of: selection) { _, newSelection in
-            Task {
-                await saveSelection(newSelection)
+        .onChange(of: viewModel.isPickerPresented) { _, isPresented in
+            // Commit draft only when picker dismisses, not on every binding mutation.
+            // If the user tapped Cancel, FamilyActivityPicker leaves draftSelection
+            // unchanged, so writing it back to the service is a harmless no-op.
+            if !isPresented {
+                viewModel.pickerDismissed()
             }
         }
         .task {
-            await loadCurrentSelection()
+            await viewModel.loadCurrentSelection()
         }
         .alert(
             String(localized: "Error"),
-            isPresented: $showError
+            isPresented: $viewModel.showError
         ) {
             Button(String(localized: "OK"), role: .cancel) {}
         } message: {
-            Text(errorMessage)
+            Text(viewModel.errorMessage)
         }
     }
-    
-    // MARK: - Computed Properties
-    
-    /// Whether the user has selected any apps or categories.
-    private var hasSelection: Bool {
-        !selection.applicationTokens.isEmpty || !selection.categoryTokens.isEmpty
-    }
-    
+
     // MARK: - Subviews
-    
-    /// Displays a summary of the current selection.
+
+    /// Displays a summary of the committed (persisted) selection.
     @ViewBuilder
     private var selectionSummary: some View {
-        let appCount = selection.applicationTokens.count
-        let categoryCount = selection.categoryTokens.count
-        
+        let appCount = viewModel.persistedSelection.applicationTokens.count
+        let categoryCount = viewModel.persistedSelection.categoryTokens.count
+
         if appCount == 0 && categoryCount == 0 {
             HStack {
                 Image(systemName: "app.badge")
@@ -107,7 +89,7 @@ struct AppPickerView: View {
                     )
                     .foregroundStyle(.primary)
                 }
-                
+
                 if categoryCount > 0 {
                     Label(
                         String(localized: "\(categoryCount) category(ies) selected"),
@@ -119,84 +101,25 @@ struct AppPickerView: View {
             .accessibilityIdentifier("selectionSummary")
         }
     }
-    
-    /// Button to present the family activity picker.
-    private var selectAppsButton: some View {
+
+    /// Context-sensitive button: "Select Apps to Block" when empty, "Edit Blocked Apps" when populated.
+    private var pickerButton: some View {
         Button {
-            isPickerPresented = true
+            viewModel.presentPicker()
         } label: {
             HStack {
-                Image(systemName: "plus.app")
-                Text(String(localized: "Select Apps to Block"))
-                
-                if isSaving {
+                Image(systemName: viewModel.pickerButtonIcon)
+                Text(viewModel.pickerButtonTitle)
+
+                if viewModel.isSaving {
                     Spacer()
                     ProgressView()
                         .scaleEffect(0.8)
                 }
             }
         }
-        .disabled(isSaving)
+        .disabled(viewModel.isSaving)
         .accessibilityIdentifier("selectAppsButton")
-    }
-    
-    /// Button to clear the current selection.
-    private var clearSelectionButton: some View {
-        Button(role: .destructive) {
-            clearSelection()
-        } label: {
-            HStack {
-                Image(systemName: "xmark.circle.fill")
-                Text(String(localized: "Clear"))
-            }
-        }
-        .disabled(isSaving)
-        .accessibilityIdentifier("clearSelectionButton")
-    }
-    
-    // MARK: - Private Methods
-    
-    /// Loads the current selection from the blocker service.
-    private func loadCurrentSelection() async {
-        selection = await blockerService.getSelection()
-    }
-    
-    /// Saves the selection to the blocker service and applies shields immediately.
-    /// - Parameter newSelection: The updated `FamilyActivitySelection` to persist.
-    private func saveSelection(_ newSelection: FamilyActivitySelection) async {
-        isSaving = true
-        defer { isSaving = false }
-        
-        do {
-            try await blockerService.setSelection(newSelection)
-            
-            // Apply or remove shields immediately based on whether apps are selected.
-            // **Why apply shields here?** The user expects changes to take effect right away.
-            // If we only persist the selection without updating shields, the blocking
-            // state won't change until some other code path calls updateShields.
-            let hasAppsSelected = !newSelection.applicationTokens.isEmpty || !newSelection.categoryTokens.isEmpty
-            try await blockerService.updateShields(shouldBlock: hasAppsSelected)
-            
-            // Provide haptic feedback on successful save
-            await MainActor.run {
-                let generator = UINotificationFeedbackGenerator()
-                generator.notificationOccurred(.success)
-            }
-        } catch {
-            // Provide haptic feedback on error
-            await MainActor.run {
-                let generator = UINotificationFeedbackGenerator()
-                generator.notificationOccurred(.error)
-            }
-            errorMessage = error.localizedDescription
-            showError = true
-        }
-    }
-    
-    /// Clears the current app and category selection.
-    private func clearSelection() {
-        // Setting to empty selection will trigger the onChange handler
-        selection = FamilyActivitySelection()
     }
 }
 
