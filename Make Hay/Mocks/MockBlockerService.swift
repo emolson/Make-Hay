@@ -56,7 +56,7 @@ actor MockBlockerService: BlockerServiceProtocol {
     func setSelection(_ selection: FamilyActivitySelection) async throws {
         if shouldThrowError {
             throw BlockerServiceError.shieldUpdateFailed(
-                underlying: NSError(domain: "MockError", code: 0)
+                description: "Mock error"
             )
         }
         self.selection = selection
@@ -71,7 +71,7 @@ actor MockBlockerService: BlockerServiceProtocol {
     func setPendingSelection(_ selection: FamilyActivitySelection, effectiveDate: Date) async throws {
         if shouldThrowError {
             throw BlockerServiceError.shieldUpdateFailed(
-                underlying: NSError(domain: "MockError", code: 0)
+                description: "Mock error"
             )
         }
 

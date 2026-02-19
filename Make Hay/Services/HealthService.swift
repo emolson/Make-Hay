@@ -28,6 +28,13 @@ actor HealthService: HealthServiceProtocol {
     /// due to privacy. We track successful authorization requests ourselves.
     private var hasRequestedAuthorization: Bool = false
     
+    /// Maximum time to wait for a single HealthKit query before treating it as failed.
+    ///
+    /// **Why 10 seconds?** HealthKit queries typically return in < 1s. If the HealthKit
+    /// daemon is unresponsive (system pressure, post-update), waiting indefinitely traps
+    /// the UI in a permanent loading spinner. 10 seconds is generous but bounded.
+    private static let queryTimeoutSeconds: UInt64 = 10
+    
     // MARK: - Initialization
     
     /// Creates a new HealthService instance.
@@ -102,22 +109,27 @@ actor HealthService: HealthServiceProtocol {
             options: .strictStartDate
         )
         
-        return try await withCheckedThrowingContinuation { continuation in
-            let query = HKStatisticsQuery(
-                quantityType: stepType,
-                quantitySamplePredicate: predicate,
-                options: .cumulativeSum
-            ) { _, statistics, error in
-                if let error = error {
-                    continuation.resume(throwing: HealthServiceError.queryFailed(underlying: error))
-                    return
+        let localStepType = stepType
+        let localStore = healthStore
+        
+        return try await withThrowingTimeout(seconds: Self.queryTimeoutSeconds) {
+            try await withCheckedThrowingContinuation { continuation in
+                let query = HKStatisticsQuery(
+                    quantityType: localStepType,
+                    quantitySamplePredicate: predicate,
+                    options: .cumulativeSum
+                ) { _, statistics, error in
+                    if let error = error {
+                        continuation.resume(throwing: HealthServiceError.queryFailed(underlying: error))
+                        return
+                    }
+                    
+                    let steps = statistics?.sumQuantity()?.doubleValue(for: .count()) ?? 0
+                    continuation.resume(returning: Int(steps))
                 }
                 
-                let steps = statistics?.sumQuantity()?.doubleValue(for: .count()) ?? 0
-                continuation.resume(returning: Int(steps))
+                localStore.execute(query)
             }
-            
-            healthStore.execute(query)
         }
     }
     
@@ -132,22 +144,27 @@ actor HealthService: HealthServiceProtocol {
             options: .strictStartDate
         )
         
-        return try await withCheckedThrowingContinuation { continuation in
-            let query = HKStatisticsQuery(
-                quantityType: activeEnergyType,
-                quantitySamplePredicate: predicate,
-                options: .cumulativeSum
-            ) { _, statistics, error in
-                if let error = error {
-                    continuation.resume(throwing: HealthServiceError.queryFailed(underlying: error))
-                    return
+        let localEnergyType = activeEnergyType
+        let localStore = healthStore
+        
+        return try await withThrowingTimeout(seconds: Self.queryTimeoutSeconds) {
+            try await withCheckedThrowingContinuation { continuation in
+                let query = HKStatisticsQuery(
+                    quantityType: localEnergyType,
+                    quantitySamplePredicate: predicate,
+                    options: .cumulativeSum
+                ) { _, statistics, error in
+                    if let error = error {
+                        continuation.resume(throwing: HealthServiceError.queryFailed(underlying: error))
+                        return
+                    }
+                    
+                    let calories = statistics?.sumQuantity()?.doubleValue(for: .kilocalorie()) ?? 0
+                    continuation.resume(returning: calories)
                 }
                 
-                let calories = statistics?.sumQuantity()?.doubleValue(for: .kilocalorie()) ?? 0
-                continuation.resume(returning: calories)
+                localStore.execute(query)
             }
-            
-            healthStore.execute(query)
         }
     }
     
@@ -163,48 +180,56 @@ actor HealthService: HealthServiceProtocol {
             options: .strictStartDate
         )
         
+        let localWorkoutType = workoutType
+        let localExerciseType = exerciseTimeType
+        let localStore = healthStore
+        
         if let activityType {
             let workoutPredicate = HKQuery.predicateForWorkouts(with: activityType)
             let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [datePredicate, workoutPredicate])
             
-            return try await withCheckedThrowingContinuation { continuation in
-                let query = HKSampleQuery(
-                    sampleType: workoutType,
-                    predicate: predicate,
-                    limit: HKObjectQueryNoLimit,
-                    sortDescriptors: nil
-                ) { _, samples, error in
-                    if let error = error {
-                        continuation.resume(throwing: HealthServiceError.queryFailed(underlying: error))
-                        return
+            return try await withThrowingTimeout(seconds: Self.queryTimeoutSeconds) {
+                try await withCheckedThrowingContinuation { continuation in
+                    let query = HKSampleQuery(
+                        sampleType: localWorkoutType,
+                        predicate: predicate,
+                        limit: HKObjectQueryNoLimit,
+                        sortDescriptors: nil
+                    ) { _, samples, error in
+                        if let error = error {
+                            continuation.resume(throwing: HealthServiceError.queryFailed(underlying: error))
+                            return
+                        }
+                        
+                        let totalSeconds = (samples ?? [])
+                            .compactMap { $0 as? HKWorkout }
+                            .reduce(0.0) { $0 + $1.duration }
+                        let minutes = Int((totalSeconds / 60.0).rounded(.down))
+                        continuation.resume(returning: minutes)
                     }
                     
-                    let totalSeconds = (samples ?? [])
-                        .compactMap { $0 as? HKWorkout }
-                        .reduce(0.0) { $0 + $1.duration }
-                    let minutes = Int((totalSeconds / 60.0).rounded(.down))
-                    continuation.resume(returning: minutes)
+                    localStore.execute(query)
                 }
-                
-                healthStore.execute(query)
             }
         } else {
-            return try await withCheckedThrowingContinuation { continuation in
-                let query = HKStatisticsQuery(
-                    quantityType: exerciseTimeType,
-                    quantitySamplePredicate: datePredicate,
-                    options: .cumulativeSum
-                ) { _, statistics, error in
-                    if let error = error {
-                        continuation.resume(throwing: HealthServiceError.queryFailed(underlying: error))
-                        return
+            return try await withThrowingTimeout(seconds: Self.queryTimeoutSeconds) {
+                try await withCheckedThrowingContinuation { continuation in
+                    let query = HKStatisticsQuery(
+                        quantityType: localExerciseType,
+                        quantitySamplePredicate: datePredicate,
+                        options: .cumulativeSum
+                    ) { _, statistics, error in
+                        if let error = error {
+                            continuation.resume(throwing: HealthServiceError.queryFailed(underlying: error))
+                            return
+                        }
+                        
+                        let minutes = statistics?.sumQuantity()?.doubleValue(for: .minute()) ?? 0
+                        continuation.resume(returning: Int(minutes.rounded(.down)))
                     }
                     
-                    let minutes = statistics?.sumQuantity()?.doubleValue(for: .minute()) ?? 0
-                    continuation.resume(returning: Int(minutes.rounded(.down)))
+                    localStore.execute(query)
                 }
-                
-                healthStore.execute(query)
             }
         }
     }
@@ -221,5 +246,36 @@ actor HealthService: HealthServiceProtocol {
             steps: steps,
             activeEnergy: activeEnergy
         )
+    }
+    
+    // MARK: - Private Helpers
+    
+    /// Races an async operation against a deadline.
+    ///
+    /// **Why?** `withCheckedThrowingContinuation` wrapping HealthKit callbacks will
+    /// hang forever if the callback is never invoked (daemon crash, system pressure).
+    /// This helper ensures we always resume within a bounded time, surfacing a clear
+    /// timeout error instead of an infinite loading spinner.
+    private func withThrowingTimeout<T: Sendable>(
+        seconds: UInt64,
+        operation: @Sendable @escaping () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                try await operation()
+            }
+            
+            group.addTask {
+                try await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+                throw HealthServiceError.queryTimedOut
+            }
+            
+            // The first task to finish wins; cancel the loser.
+            guard let result = try await group.next() else {
+                throw HealthServiceError.queryTimedOut
+            }
+            group.cancelAll()
+            return result
+        }
     }
 }

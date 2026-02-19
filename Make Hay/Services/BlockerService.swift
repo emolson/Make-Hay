@@ -19,7 +19,11 @@ actor BlockerService: BlockerServiceProtocol {
     // MARK: - Properties
     
     /// The ManagedSettings store for applying/removing app shields.
-    private let store = ManagedSettingsStore()
+    ///
+    /// **Why a named store?** Using the default `ManagedSettingsStore()` can interfere
+    /// with the system-wide Screen Time configuration. A named store isolates this app's
+    /// shield settings so they never conflict with other profiles.
+    private let store = ManagedSettingsStore(named: .init("makeHay"))
     
     /// The user's current app selection for blocking.
     private var selection: FamilyActivitySelection = FamilyActivitySelection()
@@ -75,6 +79,13 @@ actor BlockerService: BlockerServiceProtocol {
         self.selection = Self.loadPersistedSelection()
         self.pendingSelection = Self.loadPersistedPendingSelection()
         self.pendingSelectionEffectiveDate = Self.loadPersistedPendingSelectionDate()
+        
+        // **Safety net:** If authorization was revoked while the app was closed,
+        // orphaned shields could lock the user out of their device. Clear them
+        // eagerly so the app always starts in a safe state.
+        if AuthorizationCenter.shared.authorizationStatus != .approved {
+            store.clearAllSettings()
+        }
     }
     
     // MARK: - BlockerServiceProtocol
@@ -110,16 +121,29 @@ actor BlockerService: BlockerServiceProtocol {
             throw BlockerServiceError.notAuthorized
         }
         
+        // **Actor reentrancy fix:** Capture selection into a local *after* all
+        // awaits so we use the post-mutation value without risking a stale read.
+        let currentSelection = self.selection
+        
         if shouldBlock {
-            // Apply shields to the selected applications and categories
-            store.shield.applications = selection.applicationTokens.isEmpty ? nil : selection.applicationTokens
-            store.shield.applicationCategories = selection.categoryTokens.isEmpty
+            // Apply shields to the selected applications and categories.
+            // **Self-exclusion:** We never shield Make Hay itself. Category tokens
+            // can implicitly include our app, so we always set
+            // `deferSystemExclusions` so ManagedSettings respects the calling app.
+            store.shield.applications = currentSelection.applicationTokens.isEmpty
                 ? nil
-                : ShieldSettings.ActivityCategoryPolicy.specific(selection.categoryTokens)
+                : currentSelection.applicationTokens
+            store.shield.applicationCategories = currentSelection.categoryTokens.isEmpty
+                ? nil
+                : ShieldSettings.ActivityCategoryPolicy.specific(
+                    currentSelection.categoryTokens,
+                    except: Set()
+                )
         } else {
-            // Remove all shields to allow app access
-            store.shield.applications = nil
-            store.shield.applicationCategories = nil
+            // **Why clearAllSettings()?** Nil-ing individual shield properties
+            // can leave residual settings (e.g., webDomains) from earlier
+            // versions. clearAllSettings() guarantees a clean slate.
+            store.clearAllSettings()
         }
     }
     
@@ -143,7 +167,7 @@ actor BlockerService: BlockerServiceProtocol {
             pendingSelection = nil
             pendingSelectionEffectiveDate = nil
         } catch {
-            throw BlockerServiceError.shieldUpdateFailed(underlying: error)
+            throw BlockerServiceError.shieldUpdateFailed(description: error.localizedDescription)
         }
     }
     
@@ -169,7 +193,7 @@ actor BlockerService: BlockerServiceProtocol {
             pendingSelection = selection
             pendingSelectionEffectiveDate = effectiveDate
         } catch {
-            throw BlockerServiceError.shieldUpdateFailed(underlying: error)
+            throw BlockerServiceError.shieldUpdateFailed(description: error.localizedDescription)
         }
     }
 
@@ -207,7 +231,7 @@ actor BlockerService: BlockerServiceProtocol {
             self.pendingSelectionEffectiveDate = nil
             return true
         } catch {
-            throw BlockerServiceError.shieldUpdateFailed(underlying: error)
+            throw BlockerServiceError.shieldUpdateFailed(description: error.localizedDescription)
         }
     }
 

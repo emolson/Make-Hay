@@ -32,8 +32,15 @@ enum HealthServiceError: Error, Sendable {
     case authorizationDenied
     
     /// A query to HealthKit failed.
-    /// - Parameter underlying: The underlying error from HealthKit.
+    /// - Parameter description: The localized description of the underlying HealthKit error.
     case queryFailed(underlying: Error)
+    
+    /// A HealthKit query did not respond within the allowed timeout.
+    ///
+    /// **Why this case?** `withCheckedThrowingContinuation` wrapping HKQuery callbacks
+    /// will hang forever if the HealthKit daemon is unresponsive. This bounded-timeout
+    /// error prevents the UI from showing an infinite loading spinner.
+    case queryTimedOut
 }
 
 extension HealthServiceError: LocalizedError {
@@ -45,6 +52,8 @@ extension HealthServiceError: LocalizedError {
             return String(localized: "Permission to access health data was denied.")
         case .queryFailed(let underlying):
             return String(localized: "Failed to fetch health data: \(underlying.localizedDescription)")
+        case .queryTimedOut:
+            return String(localized: "Health data query timed out. Please try again.")
         }
     }
 }

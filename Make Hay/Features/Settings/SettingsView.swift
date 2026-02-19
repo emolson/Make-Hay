@@ -24,9 +24,11 @@ struct SettingsView: View {
     
     // MARK: - State
     
+    #if DEBUG
     /// Debug state for manually forcing app blocking on/off.
     /// Persisted to survive app restarts during testing sessions.
     @AppStorage("debugForceBlocking") private var isForceBlocking: Bool = false
+    #endif
     
     /// Tracks any error message to display in an alert.
     @State private var errorMessage: String?
@@ -34,10 +36,12 @@ struct SettingsView: View {
     /// Tracks whether the error alert is shown.
     @State private var showingErrorAlert: Bool = false
     
+    #if DEBUG
     /// Reference to the current shield update task for cancellation handling.
     /// **Why store this?** Prevents race conditions when the toggle changes rapidly
     /// by cancelling any in-flight request before starting a new one.
     @State private var shieldUpdateTask: Task<Void, Never>?
+    #endif
     
     /// Tracks the current health authorization status for display.
     @State private var healthAuthStatus: HealthAuthorizationStatus = .notDetermined
@@ -52,7 +56,9 @@ struct SettingsView: View {
             List {
                 blockedAppsSection
                 permissionsSection
+                #if DEBUG
                 debugSection
+                #endif
             }
             .navigationTitle(String(localized: "Settings"))
             .task {
@@ -192,6 +198,11 @@ struct SettingsView: View {
     /// **Why this exists:** FamilyControls and ManagedSettings only work on physical devices,
     /// not in the Simulator. This toggle allows developers to verify the blocking mechanism
     /// works independently of the health goal logic before full integration testing.
+    ///
+    /// **Why `#if DEBUG`?** In production, this toggle could accidentally lock the user
+    /// out of all their apps with no way to undo it. Restricting to debug builds ensures
+    /// it's only available during development.
+    #if DEBUG
     @ViewBuilder
     private var debugSection: some View {
         Section {
@@ -241,6 +252,7 @@ struct SettingsView: View {
                 .foregroundStyle(.orange)
         }
     }
+    #endif
     
     // MARK: - Health Permission Display
     

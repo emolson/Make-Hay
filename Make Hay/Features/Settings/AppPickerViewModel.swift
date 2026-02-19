@@ -75,6 +75,14 @@ final class AppPickerViewModel: ObservableObject {
 
     /// Selection currently awaiting user confirmation for schedule/emergency paths.
     private var pendingSelectionCandidate: FamilyActivitySelection?
+    
+    /// Reference to the in-flight picker-dismissed task.
+    ///
+    /// **Why store this?** `pickerDismissed()` spawns an unstructured Task that can
+    /// outlive the view. If the user re-opens the picker before the previous task
+    /// completes, the old task could apply stale shields. Storing the reference
+    /// allows us to cancel it before spawning a new one.
+    private var dismissTask: Task<Void, Never>?
 
     // MARK: - Initialization
 
@@ -119,7 +127,8 @@ final class AppPickerViewModel: ObservableObject {
     ///
     /// - Parameter force: If `true`, bypasses the equality check (used for testing).
     func pickerDismissed(force: Bool = false) {
-        Task {
+        dismissTask?.cancel()
+        dismissTask = Task {
             await handlePickerDismissed(with: draftSelection, force: force)
         }
     }
