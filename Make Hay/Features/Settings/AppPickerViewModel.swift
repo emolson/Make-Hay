@@ -116,9 +116,11 @@ final class AppPickerViewModel: ObservableObject {
     /// Commits `draftSelection` to the service. If the user tapped Cancel,
     /// `FamilyActivityPicker` does not update the binding — `draftSelection`
     /// stays equal to `persistedSelection` and the write is a data-level no-op.
-    func pickerDismissed() {
+    ///
+    /// - Parameter force: If `true`, bypasses the equality check (used for testing).
+    func pickerDismissed(force: Bool = false) {
         Task {
-            await handlePickerDismissed(with: draftSelection)
+            await handlePickerDismissed(with: draftSelection, force: force)
         }
     }
 
@@ -156,14 +158,27 @@ final class AppPickerViewModel: ObservableObject {
     // MARK: - Private Methods
 
     /// Handles picker dismissal by deciding between immediate persist and deferred guard flow.
-    private func handlePickerDismissed(with selection: FamilyActivitySelection) async {
+    ///
+    /// **Policy:** Adding new apps/categories to the block list is always allowed immediately
+    /// because it makes the restriction *stricter*. Removing apps/categories loosens the
+    /// restriction (an "easier" change), so it is gated behind the goal guard.
+    private func handlePickerDismissed(with selection: FamilyActivitySelection, force: Bool = false) async {
         // Cancel/no-change path remains a data-level no-op.
-        guard selection != persistedSelection else { return }
+        if !force {
+            guard selection != persistedSelection else { return }
+        }
 
-        if await shouldDeferEdit() {
-            pendingSelectionCandidate = selection
-            showingPendingConfirmation = true
-            return
+        let isRemovingApps = !persistedSelection.applicationTokens.isSubset(of: selection.applicationTokens)
+        let isRemovingCategories = !persistedSelection.categoryTokens.isSubset(of: selection.categoryTokens)
+        let isWeakeningBlock = isRemovingApps || isRemovingCategories
+
+        if isWeakeningBlock {
+            let shouldDefer = await shouldDeferEdit()
+            if shouldDefer {
+                pendingSelectionCandidate = selection
+                showingPendingConfirmation = true
+                return
+            }
         }
 
         await persistSelection(selection)

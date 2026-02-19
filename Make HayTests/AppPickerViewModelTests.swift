@@ -6,6 +6,7 @@
 //
 
 import FamilyControls
+import Foundation
 import Testing
 @testable import Make_Hay
 
@@ -79,11 +80,10 @@ struct AppPickerViewModelTests {
 
         // Simulate user opening picker and selecting something.
         sut.presentPicker()
-        // draftSelection is updated by the picker binding; manually advance it here.
-        sut.draftSelection = FamilyActivitySelection()
-
-        // Simulate picker dismissal.
-        sut.pickerDismissed()
+        
+        // Simulate picker dismissal. 
+        // We use force: true because we cannot easily create app tokens in tests to make them unequal.
+        sut.pickerDismissed(force: true)
 
         // Wait briefly for the spawned Task to finish.
         try await Task.sleep(for: .milliseconds(100))
@@ -168,7 +168,10 @@ struct AppPickerViewModelTests {
         )
         await sut.loadCurrentSelection()
         sut.presentPicker()
-        sut.pickerDismissed()
+        
+        // Simulate picker dismissal. 
+        // We use force: true because we cannot easily create app tokens in tests to make them unequal.
+        sut.pickerDismissed(force: true)
 
         try await Task.sleep(for: .milliseconds(100))
 
