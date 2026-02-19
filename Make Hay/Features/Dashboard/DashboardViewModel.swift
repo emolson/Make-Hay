@@ -264,7 +264,7 @@ final class DashboardViewModel: GoalStatusProvider {
     /// queries can succeed. Requesting authorization when already granted is a no-op.
     func onAppear() async {
         refreshGoalFromStorage()
-        try? await blockerService.applyPendingSelectionIfReady()
+        _ = try? await blockerService.applyPendingSelectionIfReady()
         await requestAuthorizationAndLoad()
     }
     
@@ -277,7 +277,7 @@ final class DashboardViewModel: GoalStatusProvider {
         
         // Apply any pending goal changes that are now effective
         refreshGoalFromStorage()
-        try? await blockerService.applyPendingSelectionIfReady()
+        _ = try? await blockerService.applyPendingSelectionIfReady()
         
         isLoading = true
         errorMessage = nil
@@ -311,7 +311,7 @@ final class DashboardViewModel: GoalStatusProvider {
         do {
             try await healthService.requestAuthorization()
             refreshGoalFromStorage()
-            try? await blockerService.applyPendingSelectionIfReady()
+            _ = try? await blockerService.applyPendingSelectionIfReady()
             let results = try await fetchEnabledGoals()
             currentSteps = results.steps
             currentActiveEnergy = results.activeEnergy

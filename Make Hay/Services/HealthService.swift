@@ -103,17 +103,17 @@ actor HealthService: HealthServiceProtocol {
     func fetchDailySteps() async throws -> Int {
         let now = Date()
         let startOfDay = Calendar.current.startOfDay(for: now)
-        let predicate = HKQuery.predicateForSamples(
-            withStart: startOfDay,
-            end: now,
-            options: .strictStartDate
-        )
         
         let localStepType = stepType
         let localStore = healthStore
         
         return try await withThrowingTimeout(seconds: Self.queryTimeoutSeconds) {
             try await withCheckedThrowingContinuation { continuation in
+                let predicate = HKQuery.predicateForSamples(
+                    withStart: startOfDay,
+                    end: now,
+                    options: .strictStartDate
+                )
                 let query = HKStatisticsQuery(
                     quantityType: localStepType,
                     quantitySamplePredicate: predicate,
@@ -138,17 +138,17 @@ actor HealthService: HealthServiceProtocol {
     func fetchActiveEnergy() async throws -> Double {
         let now = Date()
         let startOfDay = Calendar.current.startOfDay(for: now)
-        let predicate = HKQuery.predicateForSamples(
-            withStart: startOfDay,
-            end: now,
-            options: .strictStartDate
-        )
         
         let localEnergyType = activeEnergyType
         let localStore = healthStore
         
         return try await withThrowingTimeout(seconds: Self.queryTimeoutSeconds) {
             try await withCheckedThrowingContinuation { continuation in
+                let predicate = HKQuery.predicateForSamples(
+                    withStart: startOfDay,
+                    end: now,
+                    options: .strictStartDate
+                )
                 let query = HKStatisticsQuery(
                     quantityType: localEnergyType,
                     quantitySamplePredicate: predicate,
@@ -174,22 +174,21 @@ actor HealthService: HealthServiceProtocol {
     func fetchExerciseMinutes(for activityType: HKWorkoutActivityType?) async throws -> Int {
         let now = Date()
         let startOfDay = Calendar.current.startOfDay(for: now)
-        let datePredicate = HKQuery.predicateForSamples(
-            withStart: startOfDay,
-            end: now,
-            options: .strictStartDate
-        )
         
         let localWorkoutType = workoutType
         let localExerciseType = exerciseTimeType
         let localStore = healthStore
         
         if let activityType {
-            let workoutPredicate = HKQuery.predicateForWorkouts(with: activityType)
-            let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [datePredicate, workoutPredicate])
-            
             return try await withThrowingTimeout(seconds: Self.queryTimeoutSeconds) {
                 try await withCheckedThrowingContinuation { continuation in
+                    let datePredicate = HKQuery.predicateForSamples(
+                        withStart: startOfDay,
+                        end: now,
+                        options: .strictStartDate
+                    )
+                    let workoutPredicate = HKQuery.predicateForWorkouts(with: activityType)
+                    let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [datePredicate, workoutPredicate])
                     let query = HKSampleQuery(
                         sampleType: localWorkoutType,
                         predicate: predicate,
@@ -214,6 +213,11 @@ actor HealthService: HealthServiceProtocol {
         } else {
             return try await withThrowingTimeout(seconds: Self.queryTimeoutSeconds) {
                 try await withCheckedThrowingContinuation { continuation in
+                    let datePredicate = HKQuery.predicateForSamples(
+                        withStart: startOfDay,
+                        end: now,
+                        options: .strictStartDate
+                    )
                     let query = HKStatisticsQuery(
                         quantityType: localExerciseType,
                         quantitySamplePredicate: datePredicate,
