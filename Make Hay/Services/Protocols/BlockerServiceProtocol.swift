@@ -8,6 +8,12 @@
 import FamilyControls
 import Foundation
 
+/// Scheduled blocked-app selection to apply at a future effective date.
+struct PendingAppSelection: Sendable {
+    let selection: FamilyActivitySelection
+    let effectiveDate: Date
+}
+
 /// Protocol defining the interface for app blocking operations using FamilyControls.
 /// Conforms to Actor for thread-safe access to shield management.
 protocol BlockerServiceProtocol: Actor {
@@ -33,4 +39,24 @@ protocol BlockerServiceProtocol: Actor {
     /// Retrieves the current app selection.
     /// - Returns: The stored `FamilyActivitySelection`, or an empty selection if none exists.
     func getSelection() async -> FamilyActivitySelection
+
+    /// Stores a pending app selection to apply at the given effective date.
+    /// - Parameters:
+    ///   - selection: The blocked-app selection to apply in the future.
+    ///   - effectiveDate: Date when the pending selection becomes active.
+    /// - Throws: `BlockerServiceError` if persistence fails.
+    func setPendingSelection(_ selection: FamilyActivitySelection, effectiveDate: Date) async throws
+
+    /// Retrieves the currently scheduled pending app selection, if any.
+    /// - Returns: The pending selection payload and effective date.
+    func getPendingSelection() async -> PendingAppSelection?
+
+    /// Applies pending selection if its effective date has passed.
+    /// - Returns: `true` if pending selection was applied; otherwise `false`.
+    /// - Throws: `BlockerServiceError` if persistence fails.
+    @discardableResult
+    func applyPendingSelectionIfReady() async throws -> Bool
+
+    /// Cancels any pending app selection.
+    func cancelPendingSelection() async
 }

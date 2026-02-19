@@ -23,6 +23,12 @@ actor BlockerService: BlockerServiceProtocol {
     
     /// The user's current app selection for blocking.
     private var selection: FamilyActivitySelection = FamilyActivitySelection()
+
+    /// Pending app selection scheduled for future application.
+    private var pendingSelection: FamilyActivitySelection?
+
+    /// Effective date for applying `pendingSelection`.
+    private var pendingSelectionEffectiveDate: Date?
     
     /// The file URL where the selection is persisted.
     private static var selectionURL: URL {
@@ -31,6 +37,24 @@ actor BlockerService: BlockerServiceProtocol {
             in: .userDomainMask
         ).first!
         return documentsDirectory.appendingPathComponent("FamilyActivitySelection.plist")
+    }
+
+    /// The file URL where pending selection is persisted.
+    private static var pendingSelectionURL: URL {
+        let documentsDirectory = FileManager.default.urls(
+            for: .documentDirectory,
+            in: .userDomainMask
+        ).first!
+        return documentsDirectory.appendingPathComponent("PendingFamilyActivitySelection.plist")
+    }
+
+    /// The file URL where pending selection effective date is persisted.
+    private static var pendingSelectionDateURL: URL {
+        let documentsDirectory = FileManager.default.urls(
+            for: .documentDirectory,
+            in: .userDomainMask
+        ).first!
+        return documentsDirectory.appendingPathComponent("PendingFamilyActivitySelectionDate.plist")
     }
     
     // MARK: - BlockerServiceProtocol
@@ -49,6 +73,8 @@ actor BlockerService: BlockerServiceProtocol {
     init() {
         // Load persisted selection on initialization without crossing actor isolation.
         self.selection = Self.loadPersistedSelection()
+        self.pendingSelection = Self.loadPersistedPendingSelection()
+        self.pendingSelectionEffectiveDate = Self.loadPersistedPendingSelectionDate()
     }
     
     // MARK: - BlockerServiceProtocol
@@ -77,6 +103,8 @@ actor BlockerService: BlockerServiceProtocol {
     /// - Parameter shouldBlock: If `true`, applies shields. If `false`, removes them.
     /// - Throws: `BlockerServiceError.notAuthorized` if Family Controls is not authorized.
     func updateShields(shouldBlock: Bool) async throws {
+        _ = try await applyPendingSelectionIfReady()
+
         // Verify authorization status before attempting to modify shields
         guard AuthorizationCenter.shared.authorizationStatus == .approved else {
             throw BlockerServiceError.notAuthorized
@@ -111,6 +139,9 @@ actor BlockerService: BlockerServiceProtocol {
             encoder.outputFormat = .binary
             let data = try encoder.encode(selection)
             try data.write(to: Self.selectionURL, options: .atomic)
+            clearPersistedPendingSelection()
+            pendingSelection = nil
+            pendingSelectionEffectiveDate = nil
         } catch {
             throw BlockerServiceError.shieldUpdateFailed(underlying: error)
         }
@@ -119,7 +150,72 @@ actor BlockerService: BlockerServiceProtocol {
     /// Retrieves the current app selection.
     /// - Returns: The stored `FamilyActivitySelection`, or an empty selection if none exists.
     func getSelection() async -> FamilyActivitySelection {
+        _ = try? await applyPendingSelectionIfReady()
         return selection
+    }
+
+    /// Stores a pending selection and effective date for deferred application.
+    func setPendingSelection(_ selection: FamilyActivitySelection, effectiveDate: Date) async throws {
+        do {
+            let encoder = PropertyListEncoder()
+            encoder.outputFormat = .binary
+
+            let selectionData = try encoder.encode(selection)
+            try selectionData.write(to: Self.pendingSelectionURL, options: .atomic)
+
+            let dateData = try encoder.encode(effectiveDate)
+            try dateData.write(to: Self.pendingSelectionDateURL, options: .atomic)
+
+            pendingSelection = selection
+            pendingSelectionEffectiveDate = effectiveDate
+        } catch {
+            throw BlockerServiceError.shieldUpdateFailed(underlying: error)
+        }
+    }
+
+    /// Returns pending selection payload if one is currently scheduled.
+    func getPendingSelection() async -> PendingAppSelection? {
+        guard let pendingSelection,
+              let pendingSelectionEffectiveDate else {
+            return nil
+        }
+
+        return PendingAppSelection(
+            selection: pendingSelection,
+            effectiveDate: pendingSelectionEffectiveDate
+        )
+    }
+
+    /// Applies pending selection if effective now and clears pending state.
+    @discardableResult
+    func applyPendingSelectionIfReady() async throws -> Bool {
+        guard let pendingSelection,
+              let effectiveDate = pendingSelectionEffectiveDate,
+              Date() >= effectiveDate else {
+            return false
+        }
+
+        self.selection = pendingSelection
+
+        do {
+            let encoder = PropertyListEncoder()
+            encoder.outputFormat = .binary
+            let data = try encoder.encode(pendingSelection)
+            try data.write(to: Self.selectionURL, options: .atomic)
+            clearPersistedPendingSelection()
+            self.pendingSelection = nil
+            self.pendingSelectionEffectiveDate = nil
+            return true
+        } catch {
+            throw BlockerServiceError.shieldUpdateFailed(underlying: error)
+        }
+    }
+
+    /// Clears any pending selection without applying it.
+    func cancelPendingSelection() async {
+        pendingSelection = nil
+        pendingSelectionEffectiveDate = nil
+        clearPersistedPendingSelection()
     }
     
     // MARK: - Private Methods
@@ -141,6 +237,47 @@ actor BlockerService: BlockerServiceProtocol {
             // If loading fails, start with an empty selection
             // This is intentionally silent - the user can re-select apps
             return FamilyActivitySelection()
+        }
+    }
+
+    /// Loads persisted pending selection from disk.
+    private static func loadPersistedPendingSelection() -> FamilyActivitySelection? {
+        guard FileManager.default.fileExists(atPath: Self.pendingSelectionURL.path) else {
+            return nil
+        }
+
+        do {
+            let data = try Data(contentsOf: Self.pendingSelectionURL)
+            let decoder = PropertyListDecoder()
+            return try decoder.decode(FamilyActivitySelection.self, from: data)
+        } catch {
+            return nil
+        }
+    }
+
+    /// Loads persisted pending effective date from disk.
+    private static func loadPersistedPendingSelectionDate() -> Date? {
+        guard FileManager.default.fileExists(atPath: Self.pendingSelectionDateURL.path) else {
+            return nil
+        }
+
+        do {
+            let data = try Data(contentsOf: Self.pendingSelectionDateURL)
+            let decoder = PropertyListDecoder()
+            return try decoder.decode(Date.self, from: data)
+        } catch {
+            return nil
+        }
+    }
+
+    /// Deletes persisted pending selection artifacts.
+    private func clearPersistedPendingSelection() {
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: Self.pendingSelectionURL.path) {
+            try? fileManager.removeItem(at: Self.pendingSelectionURL)
+        }
+        if fileManager.fileExists(atPath: Self.pendingSelectionDateURL.path) {
+            try? fileManager.removeItem(at: Self.pendingSelectionDateURL)
         }
     }
 }

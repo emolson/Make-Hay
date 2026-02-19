@@ -8,6 +8,11 @@
 import SwiftUI
 import HealthKit
 
+/// Read-only provider exposing current gate state for reuse by other feature ViewModels.
+protocol GoalStatusProvider: AnyObject {
+    var isBlocking: Bool { get }
+}
+
 /// Supported goal types for dashboard display.
 enum GoalType: String, Sendable, CaseIterable, Identifiable {
     case steps
@@ -84,7 +89,7 @@ struct GoalProgress: Identifiable, Sendable, Equatable {
 /// dispatched to the main thread, preventing data races.
 @Observable
 @MainActor
-final class DashboardViewModel {
+final class DashboardViewModel: GoalStatusProvider {
     
     // MARK: - State
     
@@ -226,15 +231,7 @@ final class DashboardViewModel {
     
     /// Indicates whether the user has met their goal criteria based on blocking strategy.
     var isGoalMet: Bool {
-        let progresses = goalProgresses
-        guard !progresses.isEmpty else { return true }
-        
-        switch healthGoal.blockingStrategy {
-        case .any:
-            return progresses.contains { $0.isMet }
-        case .all:
-            return progresses.allSatisfy { $0.isMet }
-        }
+        GoalBlockingEvaluator.isGoalMet(goal: healthGoal, snapshot: goalEvaluationSnapshot())
     }
     
     // MARK: - Dependencies
@@ -267,6 +264,7 @@ final class DashboardViewModel {
     /// queries can succeed. Requesting authorization when already granted is a no-op.
     func onAppear() async {
         refreshGoalFromStorage()
+        try? await blockerService.applyPendingSelectionIfReady()
         await requestAuthorizationAndLoad()
     }
     
@@ -279,6 +277,7 @@ final class DashboardViewModel {
         
         // Apply any pending goal changes that are now effective
         refreshGoalFromStorage()
+        try? await blockerService.applyPendingSelectionIfReady()
         
         isLoading = true
         errorMessage = nil
@@ -312,6 +311,7 @@ final class DashboardViewModel {
         do {
             try await healthService.requestAuthorization()
             refreshGoalFromStorage()
+            try? await blockerService.applyPendingSelectionIfReady()
             let results = try await fetchEnabledGoals()
             currentSteps = results.steps
             currentActiveEnergy = results.activeEnergy
@@ -434,12 +434,8 @@ final class DashboardViewModel {
     /// The user can still adjust their goals, but won't unlock apps until they're truly earned.
     /// - Parameter newGoal: The proposed goal configuration to apply tomorrow
     func schedulePendingGoal(_ newGoal: HealthGoal) {
-        // Calculate midnight of tomorrow
-        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
-        let midnightTomorrow = Calendar.current.startOfDay(for: tomorrow)
-        
         healthGoal.pendingGoal = PendingHealthGoal(from: newGoal)
-        healthGoal.pendingGoalEffectiveDate = midnightTomorrow
+        healthGoal.pendingGoalEffectiveDate = Date.localMidnightTomorrow()
         HealthGoal.save(healthGoal)
     }
     
@@ -471,6 +467,18 @@ final class DashboardViewModel {
         healthGoal.pendingGoal = nil
         healthGoal.pendingGoalEffectiveDate = nil
         HealthGoal.save(healthGoal)
+    }
+
+    /// Returns whether easier goal edits should be deferred behind the pending-change flow.
+    ///
+    /// **Why fresh evaluation?** Goal edits are a high-impact path. We evaluate with
+    /// current Health data at action time to avoid stale UI state bypassing the gate.
+    func shouldDeferGoalEdits() async -> Bool {
+        let latestGoal = HealthGoal.load()
+        return await GoalGatekeeper.shouldDeferEdits(
+            goal: latestGoal,
+            healthService: healthService
+        )
     }
     
     // MARK: - Private Methods
@@ -505,8 +513,10 @@ final class DashboardViewModel {
     /// - Returns: True if blocking state changed from blocked to unblocked (goal achieved)
     @discardableResult
     private func checkGoalStatus() async -> Bool {
-        let hasEnabledGoals = !goalProgresses.isEmpty
-        let shouldBlock = hasEnabledGoals ? !isGoalMet : false
+        let shouldBlock = GoalBlockingEvaluator.shouldBlock(
+            goal: healthGoal,
+            snapshot: goalEvaluationSnapshot()
+        )
         let wasBlocking = isBlocking
         
         if shouldBlock {
@@ -561,6 +571,15 @@ final class DashboardViewModel {
     private func currentMinutesSinceMidnight(date: Date = Date()) -> Int {
         let components = Calendar.current.dateComponents([.hour, .minute], from: date)
         return (components.hour ?? 0) * 60 + (components.minute ?? 0)
+    }
+
+    private func goalEvaluationSnapshot() -> GoalEvaluationSnapshot {
+        GoalEvaluationSnapshot(
+            steps: currentSteps,
+            activeEnergy: currentActiveEnergy,
+            exerciseMinutesByGoalId: currentExerciseMinutes,
+            currentMinutesSinceMidnight: currentMinutesSinceMidnight()
+        )
     }
 
     private func fetchEnabledGoals() async throws -> (steps: Int, activeEnergy: Double, exerciseMinutes: [UUID: Int]) {

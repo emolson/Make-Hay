@@ -7,6 +7,65 @@
 
 import SwiftUI
 
+/// Context describing which guarded change flow is being confirmed.
+enum PendingChangeContext {
+    case goalChange
+    case blockedAppsChange
+
+    var navigationTitle: String {
+        switch self {
+        case .goalChange:
+            return String(localized: "Update Goal?")
+        case .blockedAppsChange:
+            return String(localized: "Update Blocked Apps?")
+        }
+    }
+
+    var headline: String {
+        switch self {
+        case .goalChange:
+            return String(localized: "Preserve Your Momentum")
+        case .blockedAppsChange:
+            return String(localized: "Keep Your Guardrails Intact")
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .goalChange:
+            return String(localized: "You are lowering your target. To preserve your momentum, this change will take effect tomorrow morning.")
+        case .blockedAppsChange:
+            return String(localized: "Your goals are not met yet. To preserve your commitment, blocked-app changes will take effect tomorrow morning.")
+        }
+    }
+
+    var bulletPoints: [String] {
+        switch self {
+        case .goalChange:
+            return [
+                String(localized: "Today's target remains unchanged"),
+                String(localized: "New target starts tomorrow at midnight"),
+                String(localized: "Your progress streak continues")
+            ]
+        case .blockedAppsChange:
+            return [
+                String(localized: "Today's blocking stays in place"),
+                String(localized: "New app selection starts tomorrow at midnight"),
+                String(localized: "Your goal guardrails stay consistent")
+            ]
+        }
+    }
+
+    var emergencyWarningDescription: String {
+        switch self {
+        case .goalChange:
+            return String(localized: "Emergency unlocks forfeit today's progress. This change will take effect immediately.")
+        case .blockedAppsChange:
+            return String(localized: "Emergency unlock applies your blocked-app changes immediately, even before goals are met.")
+        }
+    }
+}
+
 /// Modal view presented when a user attempts to lower their goal while apps are blocked.
 /// Implements the "Next-Day Effect" by offering to schedule the change for tomorrow,
 /// removing the immediate gratification of cheating.
@@ -23,6 +82,9 @@ struct PendingGoalChangeView: View {
     
     /// Tracks whether to show the emergency unlock flow.
     @State private var showingEmergencyUnlock: Bool = false
+
+    /// The guarded flow context that controls copy/content.
+    let context: PendingChangeContext
     
     /// Callback invoked when the user chooses to schedule the change for tomorrow.
     let onSchedule: () -> Void
@@ -46,7 +108,7 @@ struct PendingGoalChangeView: View {
                 actionButtons
             }
             .padding()
-            .navigationTitle(String(localized: "Update Goal?"))
+            .navigationTitle(context.navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -57,7 +119,9 @@ struct PendingGoalChangeView: View {
                 }
             }
             .sheet(isPresented: $showingEmergencyUnlock) {
-                EmergencyUnlockView {
+                EmergencyUnlockView(
+                    warningDescription: context.emergencyWarningDescription
+                ) {
                     onEmergencyUnlock()
                 }
             }
@@ -75,36 +139,24 @@ struct PendingGoalChangeView: View {
     
     private var messageContent: some View {
         VStack(spacing: 16) {
-            Text(String(localized: "Preserve Your Momentum"))
+            Text(context.headline)
                 .font(.title2)
                 .fontWeight(.bold)
                 .multilineTextAlignment(.center)
             
-            Text(String(localized: "You are lowering your target. To preserve your momentum, this change will take effect tomorrow morning."))
+            Text(context.message)
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             
             VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                    Text(String(localized: "Today's target remains unchanged"))
-                        .font(.subheadline)
-                }
-                
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                    Text(String(localized: "New target starts tomorrow at midnight"))
-                        .font(.subheadline)
-                }
-                
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                    Text(String(localized: "Your progress streak continues"))
-                        .font(.subheadline)
+                ForEach(context.bulletPoints, id: \.self) { bullet in
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Text(bullet)
+                            .font(.subheadline)
+                    }
                 }
             }
             .padding()
@@ -144,7 +196,7 @@ struct PendingGoalChangeView: View {
 // MARK: - Preview
 
 #Preview {
-    PendingGoalChangeView {
+    PendingGoalChangeView(context: .goalChange) {
         print("Scheduled for tomorrow")
     } onEmergencyUnlock: {
         print("Emergency unlock confirmed")

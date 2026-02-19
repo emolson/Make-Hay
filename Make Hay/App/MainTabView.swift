@@ -15,10 +15,7 @@ struct MainTabView: View {
     var body: some View {
         TabView {
             DashboardView(
-                viewModel: DashboardViewModel(
-                    healthService: container.healthService,
-                    blockerService: container.blockerService
-                )
+                viewModel: container.dashboardViewModel
             )
             .tabItem {
                 Label(
@@ -30,7 +27,8 @@ struct MainTabView: View {
             
             SettingsView(
                 healthService: container.healthService,
-                blockerService: container.blockerService
+                blockerService: container.blockerService,
+                goalStatusProvider: container.dashboardViewModel
             )
                 .tabItem {
                     Label(

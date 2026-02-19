@@ -22,6 +22,10 @@ actor MockBlockerService: BlockerServiceProtocol {
     
     /// The stored app selection (simulates persistence).
     var selection: FamilyActivitySelection = FamilyActivitySelection()
+
+    /// Pending selection and effective date for deferred edits.
+    var pendingSelection: FamilyActivitySelection?
+    var pendingSelectionEffectiveDate: Date?
     
     /// Returns the mock authorization status.
     var isAuthorized: Bool {
@@ -62,6 +66,48 @@ actor MockBlockerService: BlockerServiceProtocol {
     /// - Returns: The current `FamilyActivitySelection`.
     func getSelection() async -> FamilyActivitySelection {
         return selection
+    }
+
+    func setPendingSelection(_ selection: FamilyActivitySelection, effectiveDate: Date) async throws {
+        if shouldThrowError {
+            throw BlockerServiceError.shieldUpdateFailed(
+                underlying: NSError(domain: "MockError", code: 0)
+            )
+        }
+
+        pendingSelection = selection
+        pendingSelectionEffectiveDate = effectiveDate
+    }
+
+    func getPendingSelection() async -> PendingAppSelection? {
+        guard let pendingSelection,
+              let pendingSelectionEffectiveDate else {
+            return nil
+        }
+
+        return PendingAppSelection(
+            selection: pendingSelection,
+            effectiveDate: pendingSelectionEffectiveDate
+        )
+    }
+
+    @discardableResult
+    func applyPendingSelectionIfReady() async throws -> Bool {
+        guard let pendingSelection,
+              let pendingSelectionEffectiveDate,
+              Date() >= pendingSelectionEffectiveDate else {
+            return false
+        }
+
+        selection = pendingSelection
+        self.pendingSelection = nil
+        self.pendingSelectionEffectiveDate = nil
+        return true
+    }
+
+    func cancelPendingSelection() async {
+        pendingSelection = nil
+        pendingSelectionEffectiveDate = nil
     }
     
     /// Returns the current blocking state. Useful for test assertions.

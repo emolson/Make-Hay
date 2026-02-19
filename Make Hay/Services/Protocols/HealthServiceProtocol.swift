@@ -8,6 +8,12 @@
 import Foundation
 import HealthKit
 
+/// Lightweight snapshot of current daily health metrics used for gate checks.
+struct HealthCurrentData: Sendable {
+    let steps: Int
+    let activeEnergy: Double
+}
+
 /// Protocol defining the interface for HealthKit operations.
 /// Conforms to Actor for thread-safe access to health data.
 protocol HealthServiceProtocol: Actor {
@@ -35,4 +41,9 @@ protocol HealthServiceProtocol: Actor {
     /// - Returns: The number of exercise minutes.
     /// - Throws: `HealthServiceError` if the query fails.
     func fetchExerciseMinutes(for activityType: HKWorkoutActivityType?) async throws -> Int
+
+    /// Fetches a lightweight current snapshot of daily metrics used for gate decisions.
+    /// - Returns: Current steps and active energy values.
+    /// - Throws: `HealthServiceError` if either query fails.
+    func fetchCurrentData() async throws -> HealthCurrentData
 }

@@ -25,6 +25,16 @@ enum GoalConfigurationMode: Equatable {
     }
 }
 
+/// Identifiable wrapper for a proposed `HealthGoal` used with `.sheet(item:)`.
+///
+/// **Why a wrapper?** `HealthGoal` is a value type without a stable identity.
+/// `.sheet(item:)` requires `Identifiable`, and a lightweight wrapper avoids
+/// polluting the model layer with presentation concerns.
+private struct PendingGoalProposal: Identifiable {
+    let id = UUID()
+    let goal: HealthGoal
+}
+
 /// View for configuring a specific goal type's target value.
 /// Supports both adding new goals and editing existing ones.
 ///
@@ -38,7 +48,12 @@ struct GoalConfigurationView: View {
     
     // MARK: - State
     
-    @State private var viewModel: DashboardViewModel
+    /// Non-owned reference to the shared dashboard ViewModel.
+    /// **Why `let` instead of `@State`?** This view does not own the ViewModel — it is
+    /// created by `DashboardView` and passed in. Using `@State` for a non-owned
+    /// `@Observable` reference can cause lifecycle issues where the first `Task`
+    /// capture receives a stale wrapper, bypassing the gate on initial presentation.
+    let viewModel: DashboardViewModel
     let goalType: GoalType
     let mode: GoalConfigurationMode
     
@@ -48,8 +63,14 @@ struct GoalConfigurationView: View {
     @State private var isSaving: Bool = false
     @State private var triggerSuccessHaptic: Bool = false
     @State private var showingRemoveConfirmation: Bool = false
-    @State private var showingPendingConfirmation: Bool = false
-    @State private var proposedGoal: HealthGoal?
+
+    /// Wrapper tying a proposed goal to `.sheet(item:)` presentation.
+    ///
+    /// **Why not separate `Bool` + `Optional`?** `.sheet(isPresented:)` can render
+    /// its content before a companion `@State` optional is set, causing a blank
+    /// sheet on first presentation. `.sheet(item:)` guarantees the data is
+    /// available when the sheet content closure runs.
+    @State private var pendingProposal: PendingGoalProposal?
     
     // MARK: - Initialization
     
@@ -69,7 +90,7 @@ struct GoalConfigurationView: View {
     ///   - mode: Whether adding a new goal or editing an existing one.
     ///   - exerciseGoal: The specific exercise goal being edited (for exercise goals only).
     init(viewModel: DashboardViewModel, goalType: GoalType, mode: GoalConfigurationMode, exerciseGoal: ExerciseGoal? = nil) {
-        _viewModel = State(initialValue: viewModel)
+        self.viewModel = viewModel
         self.goalType = goalType
         self.mode = mode
         
@@ -188,20 +209,18 @@ struct GoalConfigurationView: View {
         } message: {
             Text(String(localized: "Are you sure you want to remove this goal? This cannot be undone."))
         }
-        .sheet(isPresented: $showingPendingConfirmation) {
-            if let proposedGoal {
-                PendingGoalChangeView {
-                    // Schedule for tomorrow
-                    viewModel.schedulePendingGoal(proposedGoal)
+        .sheet(item: $pendingProposal) { proposal in
+            PendingGoalChangeView(context: .goalChange) {
+                // Schedule for tomorrow
+                viewModel.schedulePendingGoal(proposal.goal)
+                dismiss()
+            } onEmergencyUnlock: {
+                // Apply immediately via emergency unlock
+                Task {
+                    await viewModel.applyEmergencyChange(proposal.goal)
+                    triggerSuccessHaptic = true
+                    try? await Task.sleep(for: .milliseconds(150))
                     dismiss()
-                } onEmergencyUnlock: {
-                    // Apply immediately via emergency unlock
-                    Task {
-                        await viewModel.applyEmergencyChange(proposedGoal)
-                        triggerSuccessHaptic = true
-                        try? await Task.sleep(for: .milliseconds(150))
-                        dismiss()
-                    }
                 }
             }
         }
@@ -355,11 +374,13 @@ struct GoalConfigurationView: View {
             
             // Determine the intent of this change
             let intent = GoalChangeIntent.determine(original: viewModel.healthGoal, proposed: newGoal)
+            let shouldDefer = intent == .easier
+                ? await viewModel.shouldDeferGoalEdits()
+                : false
             
             // If making goal easier while apps are blocked, show confirmation
-            if intent == .easier && viewModel.isBlocking {
-                proposedGoal = newGoal
-                showingPendingConfirmation = true
+            if shouldDefer {
+                pendingProposal = PendingGoalProposal(goal: newGoal)
                 isSaving = false
             } else {
                 // Apply immediately for harder goals or when not blocking
@@ -402,11 +423,13 @@ struct GoalConfigurationView: View {
             
             // Determine intent (removal is always "easier")
             let intent = GoalChangeIntent.determine(original: viewModel.healthGoal, proposed: newGoal)
+            let shouldDefer = intent == .easier
+                ? await viewModel.shouldDeferGoalEdits()
+                : false
             
             // If removing while blocked, schedule for tomorrow or require emergency override
-            if intent == .easier && viewModel.isBlocking {
-                proposedGoal = newGoal
-                showingPendingConfirmation = true
+            if shouldDefer {
+                pendingProposal = PendingGoalProposal(goal: newGoal)
             } else {
                 await viewModel.removeGoal(type: goalType, exerciseGoalId: mode.exerciseGoalId)
                 dismiss()

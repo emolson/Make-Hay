@@ -85,6 +85,21 @@ actor MockHealthService: HealthServiceProtocol {
         }
         return mockExerciseMinutes
     }
+
+    /// Returns a lightweight aggregate snapshot used by gate checks.
+    func fetchCurrentData() async throws -> HealthCurrentData {
+        if shouldThrowError {
+            throw HealthServiceError.queryFailed(
+                underlying: NSError(
+                    domain: "MockHealthService",
+                    code: 0,
+                    userInfo: [NSLocalizedDescriptionKey: "Mock error for testing"]
+                )
+            )
+        }
+
+        return HealthCurrentData(steps: mockSteps, activeEnergy: mockActiveEnergy)
+    }
     
     /// Configures the mock step count. Useful for setting up test scenarios.
     /// - Parameter steps: The number of steps to return.

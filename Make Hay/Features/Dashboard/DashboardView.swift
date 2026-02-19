@@ -580,4 +580,8 @@ private actor ErrorThrowingMockHealthService: HealthServiceProtocol {
     func fetchExerciseMinutes(for activityType: HKWorkoutActivityType?) async throws -> Int {
         throw HealthServiceError.authorizationDenied
     }
+
+    func fetchCurrentData() async throws -> HealthCurrentData {
+        throw HealthServiceError.authorizationDenied
+    }
 }

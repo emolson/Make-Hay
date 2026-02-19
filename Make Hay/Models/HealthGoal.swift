@@ -75,6 +75,141 @@ struct PendingHealthGoal: Codable, Sendable, Equatable {
     }
 }
 
+/// Snapshot input used by `GoalBlockingEvaluator` to make a gate decision.
+///
+/// **Why this type?** Keeps gate logic pure and reusable across Dashboard and
+/// Settings without coupling to a specific ViewModel.
+struct GoalEvaluationSnapshot: Sendable {
+    var steps: Int
+    var activeEnergy: Double
+    var exerciseMinutesByGoalId: [UUID: Int]
+    var currentMinutesSinceMidnight: Int
+}
+
+/// Shared evaluator for determining whether goals are currently met.
+///
+/// **Why centralize this logic?** Goal edit gating and blocked-app edit gating
+/// must stay perfectly aligned so users cannot bypass one flow via another.
+enum GoalBlockingEvaluator {
+    /// Returns whether any goal is enabled in the provided configuration.
+    static func hasEnabledGoals(goal: HealthGoal) -> Bool {
+        goal.stepGoal.isEnabled
+            || goal.activeEnergyGoal.isEnabled
+            || goal.exerciseGoals.contains(where: { $0.isEnabled })
+            || goal.timeBlockGoal.isEnabled
+    }
+
+    /// Returns whether the configured goals are met for the provided snapshot.
+    static func isGoalMet(goal: HealthGoal, snapshot: GoalEvaluationSnapshot) -> Bool {
+        let progresses = goalProgresses(goal: goal, snapshot: snapshot)
+        guard !progresses.isEmpty else { return true }
+
+        switch goal.blockingStrategy {
+        case .any:
+            return progresses.contains { $0 }
+        case .all:
+            return progresses.allSatisfy { $0 }
+        }
+    }
+
+    /// Returns whether apps should currently be blocked.
+    static func shouldBlock(goal: HealthGoal, snapshot: GoalEvaluationSnapshot) -> Bool {
+        let enabledGoals = goalProgresses(goal: goal, snapshot: snapshot)
+        guard !enabledGoals.isEmpty else { return false }
+        return !isGoalMet(goal: goal, snapshot: snapshot)
+    }
+
+    /// Returns whether easier edits should be deferred behind the pending-change flow.
+    ///
+    /// **Why separate from `shouldBlock`?** Blocking respects the user's strategy
+    /// (`.any` / `.all`), but gate decisions must be stricter: if *any* enabled goal
+    /// is still unmet, the user hasn't fully earned their unlock and shouldn't be
+    /// allowed to weaken commitments. This prevents the `.any` strategy from
+    /// letting a met time-goal silently bypass the gate on an unmet step goal.
+    static func shouldDeferChanges(goal: HealthGoal, snapshot: GoalEvaluationSnapshot) -> Bool {
+        let progresses = goalProgresses(goal: goal, snapshot: snapshot)
+        guard !progresses.isEmpty else { return false }
+        // Strict: ALL enabled goals must be met before edits are allowed
+        return !progresses.allSatisfy { $0 }
+    }
+
+    private static func goalProgresses(goal: HealthGoal, snapshot: GoalEvaluationSnapshot) -> [Bool] {
+        var progresses: [Bool] = []
+
+        if goal.stepGoal.isEnabled {
+            progresses.append(snapshot.steps >= goal.stepGoal.target)
+        }
+
+        if goal.activeEnergyGoal.isEnabled {
+            progresses.append(snapshot.activeEnergy >= Double(goal.activeEnergyGoal.target))
+        }
+
+        for exerciseGoal in goal.exerciseGoals where exerciseGoal.isEnabled {
+            let current = snapshot.exerciseMinutesByGoalId[exerciseGoal.id] ?? 0
+            progresses.append(current >= exerciseGoal.targetMinutes)
+        }
+
+        if goal.timeBlockGoal.isEnabled {
+            let isMet = goal.timeBlockGoal.clampedUnlockMinutes == 0
+                || snapshot.currentMinutesSinceMidnight >= goal.timeBlockGoal.clampedUnlockMinutes
+            progresses.append(isMet)
+        }
+
+        return progresses
+    }
+}
+
+/// Shared gatekeeper used by multiple features before applying easier edits.
+///
+/// **Policy:** If fresh health reads fail, default to deferral so users cannot
+/// bypass goal guards due to transient fetch failures.
+enum GoalGatekeeper {
+    static func shouldDeferEdits(
+        goal: HealthGoal,
+        healthService: any HealthServiceProtocol,
+        now: Date = Date()
+    ) async -> Bool {
+        do {
+            let currentData = try await healthService.fetchCurrentData()
+            let exerciseMinutes = try await fetchExerciseMinutesByGoalId(
+                goal: goal,
+                healthService: healthService
+            )
+            let snapshot = GoalEvaluationSnapshot(
+                steps: currentData.steps,
+                activeEnergy: currentData.activeEnergy,
+                exerciseMinutesByGoalId: exerciseMinutes,
+                currentMinutesSinceMidnight: currentMinutesSinceMidnight(date: now)
+            )
+
+            return GoalBlockingEvaluator.shouldDeferChanges(goal: goal, snapshot: snapshot)
+        } catch {
+            return true
+        }
+    }
+
+    private static func fetchExerciseMinutesByGoalId(
+        goal: HealthGoal,
+        healthService: any HealthServiceProtocol
+    ) async throws -> [UUID: Int] {
+        var result: [UUID: Int] = [:]
+
+        for exerciseGoal in goal.exerciseGoals where exerciseGoal.isEnabled {
+            let minutes = try await healthService.fetchExerciseMinutes(
+                for: exerciseGoal.exerciseType.hkWorkoutActivityType
+            )
+            result[exerciseGoal.id] = minutes
+        }
+
+        return result
+    }
+
+    private static func currentMinutesSinceMidnight(date: Date) -> Int {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+        return (components.hour ?? 0) * 60 + (components.minute ?? 0)
+    }
+}
+
 /// Configuration for a steps goal.
 struct StepGoal: Codable, Sendable, Equatable {
     var isEnabled: Bool = true
@@ -317,7 +452,7 @@ enum ExerciseType: String, Codable, CaseIterable, Sendable, Identifiable {
         case .basketball:
             return "basketball.fill"
         case .bowling:
-            return "bowling.ball.fill"
+            return "figure.bowling"
         case .boxing, .kickboxing, .martialArts, .wrestling:
             return "figure.mixed.cardio"
         case .climbing:

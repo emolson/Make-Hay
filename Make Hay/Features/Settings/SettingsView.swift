@@ -18,6 +18,9 @@ struct SettingsView: View {
     
     /// The blocker service for app selection. Injected for testability.
     let blockerService: any BlockerServiceProtocol
+
+    /// Shared gate-state provider to keep Settings guard decisions aligned with Dashboard.
+    let goalStatusProvider: any GoalStatusProvider
     
     // MARK: - State
     
@@ -172,7 +175,11 @@ struct SettingsView: View {
     
     private var blockedAppsSection: some View {
         Section {
-            AppPickerView(blockerService: blockerService)
+            AppPickerView(
+                blockerService: blockerService,
+                healthService: healthService,
+                goalStatusProvider: goalStatusProvider
+            )
         } header: {
             Text(String(localized: "Blocked Apps"))
         } footer: {
@@ -301,8 +308,16 @@ struct SettingsView: View {
 // MARK: - Preview
 
 #Preview {
+    let healthService = MockHealthService()
+    let blockerService = MockBlockerService()
+    let dashboardViewModel = DashboardViewModel(
+        healthService: healthService,
+        blockerService: blockerService
+    )
+
     SettingsView(
-        healthService: MockHealthService(),
-        blockerService: MockBlockerService()
+        healthService: healthService,
+        blockerService: blockerService,
+        goalStatusProvider: dashboardViewModel
     )
 }

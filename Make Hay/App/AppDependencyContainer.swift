@@ -17,6 +17,12 @@ final class AppDependencyContainer: ObservableObject {
     
     /// The blocker service for Screen Time/FamilyControls operations.
     let blockerService: any BlockerServiceProtocol
+
+    /// Shared dashboard view model used across tabs for consistent gate state.
+    lazy var dashboardViewModel: DashboardViewModel = DashboardViewModel(
+        healthService: healthService,
+        blockerService: blockerService
+    )
     
     /// Creates a new dependency container with the provided services.
     /// - Parameters:

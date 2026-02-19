@@ -31,10 +31,17 @@ struct EmergencyUnlockView: View {
     
     /// Callback invoked when the user successfully confirms the emergency unlock.
     let onConfirm: () -> Void
+
+    /// Context-specific warning text shown above the verification challenge.
+    let warningDescription: String
     
     // MARK: - Initialization
     
-    init(onConfirm: @escaping () -> Void) {
+    init(
+        warningDescription: String = String(localized: "Emergency unlocks forfeit today's progress. This change will take effect immediately."),
+        onConfirm: @escaping () -> Void
+    ) {
+        self.warningDescription = warningDescription
         self.onConfirm = onConfirm
         // Generate a random 4-digit code
         self.verificationCode = String(format: "%04d", Int.random(in: 0...9999))
@@ -89,7 +96,7 @@ struct EmergencyUnlockView: View {
                 .font(.title2)
                 .fontWeight(.bold)
             
-            Text(String(localized: "Emergency unlocks forfeit today's progress. This change will take effect immediately."))
+            Text(warningDescription)
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

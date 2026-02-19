@@ -208,4 +208,18 @@ actor HealthService: HealthServiceProtocol {
             }
         }
     }
+
+    /// Fetches a lightweight aggregate snapshot for current gate evaluation.
+    ///
+    /// **Why async-let?** Steps and active energy queries are independent, so
+    /// fetching concurrently reduces latency before guard decisions.
+    func fetchCurrentData() async throws -> HealthCurrentData {
+        async let steps = fetchDailySteps()
+        async let activeEnergy = fetchActiveEnergy()
+
+        return try await HealthCurrentData(
+            steps: steps,
+            activeEnergy: activeEnergy
+        )
+    }
 }

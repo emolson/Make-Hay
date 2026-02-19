@@ -26,9 +26,17 @@ struct AppPickerView: View {
     // MARK: - Initialization
 
     /// - Parameter blockerService: Injected service for persisting selections and managing shields.
-    init(blockerService: any BlockerServiceProtocol) {
+    init(
+        blockerService: any BlockerServiceProtocol,
+        healthService: any HealthServiceProtocol,
+        goalStatusProvider: any GoalStatusProvider
+    ) {
         _viewModel = StateObject(
-            wrappedValue: AppPickerViewModel(blockerService: blockerService)
+            wrappedValue: AppPickerViewModel(
+                blockerService: blockerService,
+                healthService: healthService,
+                goalStatusProvider: goalStatusProvider
+            )
         )
     }
 
@@ -61,6 +69,17 @@ struct AppPickerView: View {
             Button(String(localized: "OK"), role: .cancel) {}
         } message: {
             Text(viewModel.errorMessage)
+        }
+        .sheet(isPresented: $viewModel.showingPendingConfirmation) {
+            PendingGoalChangeView(context: .blockedAppsChange) {
+                Task {
+                    await viewModel.schedulePendingSelection()
+                }
+            } onEmergencyUnlock: {
+                Task {
+                    await viewModel.applyEmergencySelectionChange()
+                }
+            }
         }
     }
 
@@ -128,9 +147,20 @@ struct AppPickerView: View {
 /// **Note:** The FamilyActivityPicker does not render in the iOS Simulator.
 /// This preview demonstrates the layout with a mock service.
 #Preview {
+    let blockerService = MockBlockerService()
+    let healthService = MockHealthService()
+    let dashboardViewModel = DashboardViewModel(
+        healthService: healthService,
+        blockerService: blockerService
+    )
+
     List {
         Section {
-            AppPickerView(blockerService: MockBlockerService())
+            AppPickerView(
+                blockerService: blockerService,
+                healthService: healthService,
+                goalStatusProvider: dashboardViewModel
+            )
         } header: {
             Text("Blocked Apps")
         }
