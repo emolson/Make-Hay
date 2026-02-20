@@ -36,29 +36,23 @@ actor BlockerService: BlockerServiceProtocol {
     
     /// The file URL where the selection is persisted.
     private static var selectionURL: URL {
-        let documentsDirectory = FileManager.default.urls(
-            for: .documentDirectory,
-            in: .userDomainMask
-        ).first!
-        return documentsDirectory.appendingPathComponent("FamilyActivitySelection.plist")
+        SharedStorage.familyActivitySelectionURL ?? fallbackDocumentsURL(
+            fileName: "FamilyActivitySelection.plist"
+        )
     }
 
     /// The file URL where pending selection is persisted.
     private static var pendingSelectionURL: URL {
-        let documentsDirectory = FileManager.default.urls(
-            for: .documentDirectory,
-            in: .userDomainMask
-        ).first!
-        return documentsDirectory.appendingPathComponent("PendingFamilyActivitySelection.plist")
+        SharedStorage.pendingFamilyActivitySelectionURL ?? fallbackDocumentsURL(
+            fileName: "PendingFamilyActivitySelection.plist"
+        )
     }
 
     /// The file URL where pending selection effective date is persisted.
     private static var pendingSelectionDateURL: URL {
-        let documentsDirectory = FileManager.default.urls(
-            for: .documentDirectory,
-            in: .userDomainMask
-        ).first!
-        return documentsDirectory.appendingPathComponent("PendingFamilyActivitySelectionDate.plist")
+        SharedStorage.pendingFamilyActivitySelectionDateURL ?? fallbackDocumentsURL(
+            fileName: "PendingFamilyActivitySelectionDate.plist"
+        )
     }
     
     // MARK: - BlockerServiceProtocol
@@ -303,5 +297,13 @@ actor BlockerService: BlockerServiceProtocol {
         if fileManager.fileExists(atPath: Self.pendingSelectionDateURL.path) {
             try? fileManager.removeItem(at: Self.pendingSelectionDateURL)
         }
+    }
+
+    private static func fallbackDocumentsURL(fileName: String) -> URL {
+        let documentsDirectory = FileManager.default.urls(
+            for: .documentDirectory,
+            in: .userDomainMask
+        ).first ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        return documentsDirectory.appendingPathComponent(fileName)
     }
 }

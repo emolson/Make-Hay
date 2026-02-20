@@ -825,7 +825,7 @@ extension HealthGoal {
     static let storageKey: String = "healthGoalData"
     static let legacyStepKey: String = "dailyStepGoal"
     
-    static func load(from defaults: UserDefaults = .standard) -> HealthGoal {
+    static func load(from defaults: UserDefaults = SharedStorage.appGroupDefaults) -> HealthGoal {
         if let dataString = defaults.string(forKey: storageKey),
            let data = dataString.data(using: .utf8),
            let goal = try? JSONDecoder().decode(HealthGoal.self, from: data) {
@@ -843,7 +843,7 @@ extension HealthGoal {
         return HealthGoal()
     }
     
-    static func save(_ goal: HealthGoal, to defaults: UserDefaults = .standard) {
+    static func save(_ goal: HealthGoal, to defaults: UserDefaults = SharedStorage.appGroupDefaults) {
         if let encoded = encode(goal) {
             defaults.set(encoded, forKey: storageKey)
         }

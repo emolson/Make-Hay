@@ -125,14 +125,11 @@ final class DashboardViewModel: GoalStatusProvider {
     /// Controls presentation of the Add Goal sheet.
     var isShowingAddGoal: Bool = false
     
-    /// The last date the app checked for steps, stored as ISO8601 string.
+    /// The last day number the app checked for steps.
     /// Used to detect when a new day has started and reset blocking accordingly.
     @ObservationIgnored
-    @AppStorage("lastCheckedDate") private var lastCheckedDate: String = ""
+    @AppStorage("lastCheckedDayNumber") private var lastCheckedDayNumber: Int = 0
 
-    /// Task used to unlock apps when a time-based goal becomes active.
-    private var timeUnlockTask: Task<Void, Never>?
-    
     /// Returns goal types that are available to be added (not currently enabled).
     /// **Why this matters?** Prevents users from adding duplicate goals and provides
     /// a clean way to determine which options to show in the AddGoalView.
@@ -238,11 +235,7 @@ final class DashboardViewModel: GoalStatusProvider {
     
     private let healthService: any HealthServiceProtocol
     private let blockerService: any BlockerServiceProtocol
-    
-    /// Static ISO8601 formatter for date comparisons.
-    /// **Why static?** DateFormatters are expensive to create. A static instance
-    /// is created once and reused across all instances and calls.
-    private static let dateFormatter = ISO8601DateFormatter()
+    private let timeUnlockScheduler: any TimeUnlockScheduling
     
     // MARK: - Initialization
     
@@ -251,9 +244,14 @@ final class DashboardViewModel: GoalStatusProvider {
     ///   - healthService: The service to use for fetching health data.
     ///   - blockerService: The service to use for managing app blocking.
     ///   Both are injected as protocols to enable testing with mocks.
-    init(healthService: any HealthServiceProtocol, blockerService: any BlockerServiceProtocol) {
+    init(
+        healthService: any HealthServiceProtocol,
+        blockerService: any BlockerServiceProtocol,
+        timeUnlockScheduler: (any TimeUnlockScheduling)? = nil
+    ) {
         self.healthService = healthService
         self.blockerService = blockerService
+        self.timeUnlockScheduler = timeUnlockScheduler ?? DeviceActivityTimeUnlockScheduler()
         refreshGoalFromStorage()
     }
     
@@ -384,6 +382,7 @@ final class DashboardViewModel: GoalStatusProvider {
         }
         
         HealthGoal.save(healthGoal)
+        scheduleTimeUnlockIfNeeded()
         
         // Re-check blocking status after removing a goal
         await checkGoalStatus()
@@ -490,12 +489,11 @@ final class DashboardViewModel: GoalStatusProvider {
     /// **Design:** Synchronous date comparison with immediate state update. The subsequent
     /// async health fetch will trigger blocking via `checkGoalStatus()`.
     private func checkForNewDay() {
-        let today = Calendar.current.startOfDay(for: Date())
-        let todayString = Self.dateFormatter.string(from: today)
+        let currentDayNumber = Calendar.current.ordinality(of: .day, in: .era, for: Date()) ?? 0
         
-        // If stored date differs from today, it's a new day
-        if lastCheckedDate != todayString {
-            lastCheckedDate = todayString
+        // If stored day differs from today, it's a new day
+        if lastCheckedDayNumber != currentDayNumber {
+            lastCheckedDayNumber = currentDayNumber
             // Reset current steps to force a fresh check
             // The subsequent fetchDailySteps() will get today's actual (likely low) count
             // and checkGoalStatus() will re-engage blocking if needed
@@ -547,24 +545,21 @@ final class DashboardViewModel: GoalStatusProvider {
     }
 
     private func scheduleTimeUnlockIfNeeded() {
-        timeUnlockTask?.cancel()
+        timeUnlockScheduler.cancelDailyUnlock()
 
-        guard healthGoal.timeBlockGoal.isEnabled else { return }
+        guard healthGoal.timeBlockGoal.isEnabled else {
+            return
+        }
 
-        let now = Date()
-        let unlockDate = healthGoal.timeBlockGoal.unlockDate(on: now)
-        guard unlockDate > now else { return }
+        let unlockMinutes = healthGoal.timeBlockGoal.clampedUnlockMinutes
+        guard unlockMinutes > 0 else {
+            return
+        }
 
-        let interval = unlockDate.timeIntervalSince(now)
-        timeUnlockTask = Task { [weak self] in
-            do {
-                try await Task.sleep(for: .seconds(interval))
-            } catch {
-                return
-            }
-
-            guard !Task.isCancelled, let self else { return }
-            await self.checkGoalStatus()
+        do {
+            try timeUnlockScheduler.scheduleDailyUnlock(at: unlockMinutes)
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
