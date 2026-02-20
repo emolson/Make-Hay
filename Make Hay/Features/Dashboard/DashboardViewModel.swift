@@ -130,9 +130,6 @@ final class DashboardViewModel: GoalStatusProvider {
     @ObservationIgnored
     @AppStorage("lastCheckedDate") private var lastCheckedDate: String = ""
 
-    /// Task used to unlock apps when a time-based goal becomes active.
-    private var timeUnlockTask: Task<Void, Never>?
-    
     /// Returns goal types that are available to be added (not currently enabled).
     /// **Why this matters?** Prevents users from adding duplicate goals and provides
     /// a clean way to determine which options to show in the AddGoalView.
@@ -238,6 +235,7 @@ final class DashboardViewModel: GoalStatusProvider {
     
     private let healthService: any HealthServiceProtocol
     private let blockerService: any BlockerServiceProtocol
+    private let timeUnlockScheduler: any TimeUnlockScheduling
     
     /// Static ISO8601 formatter for date comparisons.
     /// **Why static?** DateFormatters are expensive to create. A static instance
@@ -251,9 +249,14 @@ final class DashboardViewModel: GoalStatusProvider {
     ///   - healthService: The service to use for fetching health data.
     ///   - blockerService: The service to use for managing app blocking.
     ///   Both are injected as protocols to enable testing with mocks.
-    init(healthService: any HealthServiceProtocol, blockerService: any BlockerServiceProtocol) {
+    init(
+        healthService: any HealthServiceProtocol,
+        blockerService: any BlockerServiceProtocol,
+        timeUnlockScheduler: (any TimeUnlockScheduling)? = nil
+    ) {
         self.healthService = healthService
         self.blockerService = blockerService
+        self.timeUnlockScheduler = timeUnlockScheduler ?? DeviceActivityTimeUnlockScheduler()
         refreshGoalFromStorage()
     }
     
@@ -384,6 +387,7 @@ final class DashboardViewModel: GoalStatusProvider {
         }
         
         HealthGoal.save(healthGoal)
+        scheduleTimeUnlockIfNeeded()
         
         // Re-check blocking status after removing a goal
         await checkGoalStatus()
@@ -547,24 +551,21 @@ final class DashboardViewModel: GoalStatusProvider {
     }
 
     private func scheduleTimeUnlockIfNeeded() {
-        timeUnlockTask?.cancel()
+        timeUnlockScheduler.cancelDailyUnlock()
 
-        guard healthGoal.timeBlockGoal.isEnabled else { return }
+        guard healthGoal.timeBlockGoal.isEnabled else {
+            return
+        }
 
-        let now = Date()
-        let unlockDate = healthGoal.timeBlockGoal.unlockDate(on: now)
-        guard unlockDate > now else { return }
+        let unlockMinutes = healthGoal.timeBlockGoal.clampedUnlockMinutes
+        guard unlockMinutes > 0 else {
+            return
+        }
 
-        let interval = unlockDate.timeIntervalSince(now)
-        timeUnlockTask = Task { [weak self] in
-            do {
-                try await Task.sleep(for: .seconds(interval))
-            } catch {
-                return
-            }
-
-            guard !Task.isCancelled, let self else { return }
-            await self.checkGoalStatus()
+        do {
+            try timeUnlockScheduler.scheduleDailyUnlock(at: unlockMinutes)
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
