@@ -1,0 +1,71 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Xcode
+build/
+*.moved-aside
+*.xccheckout
+*.xcscmblueprint
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Xcode - User settings
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.ouimode1v3
+*.ouimode2v3
+xcuserdata/
+
+# Xcode - DerivedData
+DerivedData/
+
+# Xcode - Swift Package Manager
+.swiftpm/xcode/
+.build/
+
+# Xcode - Playground
+timeline.xctimeline
+playground.xcworkspace
+
+# CocoaPods
+Pods/
+# Keep Podfile.lock usually, but if user wants to ignore:
+# Podfile.lock
+
+# Carthage
+Carthage/Build/
+
+# Accio
+Dependencies/
+.accio/
+
+# fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/test_output
+
+# Visual Studio Code
+.vscode/
+
+# WebStorm / IntelliJ / JetBrains
+.idea/
+*.iml
+*.iws
+
+# Misc
+.svn
+.git
+.hg
+npm-debug.log
+yarn-error.log
+
+# Local Implementation docs/notes (Optional, based on user context 'implementation/')
+# If specific implementation docs shouldn't be shared
+# implementation/ 
+# (I will leave implementation/ unignored as it seems like project doc)
