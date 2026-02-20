@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import HealthKit
 
 /// Dependency Injection container that instantiates and holds references to all services.
 /// Injects protocols, not concrete types, to enable testability and preview support.
@@ -18,6 +19,14 @@ final class AppDependencyContainer: ObservableObject {
     /// The blocker service for Screen Time/FamilyControls operations.
     let blockerService: any BlockerServiceProtocol
 
+    /// Background health monitor that observes HealthKit changes and evaluates goals.
+    ///
+    /// **Why here?** The container owns the lifecycle of all services. Starting monitoring
+    /// on init ensures observer queries are registered on every app launch, which is
+    /// required since `enableBackgroundDelivery` registrations don't persist across
+    /// app terminations.
+    let backgroundHealthMonitor: any BackgroundHealthMonitorProtocol
+
     /// Shared dashboard view model used across tabs for consistent gate state.
     lazy var dashboardViewModel: DashboardViewModel = DashboardViewModel(
         healthService: healthService,
@@ -28,26 +37,59 @@ final class AppDependencyContainer: ObservableObject {
     /// - Parameters:
     ///   - healthService: The service to use for health data. Defaults to real service if available.
     ///   - blockerService: The service to use for app blocking. Defaults to real BlockerService.
+    ///   - backgroundHealthMonitor: The background monitor. Defaults to real monitor if HealthKit is available.
     init(
         healthService: (any HealthServiceProtocol)? = nil,
-        blockerService: (any BlockerServiceProtocol)? = nil
+        blockerService: (any BlockerServiceProtocol)? = nil,
+        backgroundHealthMonitor: (any BackgroundHealthMonitorProtocol)? = nil
     ) {
+        // Create a shared HKHealthStore for use across services.
+        // **Why shared?** Apple recommends a single store per app to avoid duplicate
+        // connections to the HealthKit daemon.
+        let sharedStore: HKHealthStore? = HKHealthStore.isHealthDataAvailable() ? HKHealthStore() : nil
+
         // Use provided health service, or try to create real one.
+        let resolvedHealthService: any HealthServiceProtocol
         if let healthService = healthService {
-            self.healthService = healthService
-        } else if let realHealthService = try? HealthService() {
-            self.healthService = realHealthService
+            resolvedHealthService = healthService
+        } else if let sharedStore, let realHealthService = try? HealthService(healthStore: sharedStore) {
+            resolvedHealthService = realHealthService
         } else {
-            self.healthService = MockHealthService()
+            resolvedHealthService = MockHealthService()
         }
+        self.healthService = resolvedHealthService
         
         // Use provided blocker service, or create real BlockerService, falling back to mock
+        let resolvedBlockerService: any BlockerServiceProtocol
         if let blockerService = blockerService {
-            self.blockerService = blockerService
+            resolvedBlockerService = blockerService
         } else {
             // BlockerService init doesn't throw, but we still provide a mock fallback
             // for consistency and to support environments where FamilyControls may be unavailable
-            self.blockerService = BlockerService()
+            resolvedBlockerService = BlockerService()
+        }
+        self.blockerService = resolvedBlockerService
+
+        // Use provided background monitor, or create real one if HealthKit is available.
+        if let backgroundHealthMonitor = backgroundHealthMonitor {
+            self.backgroundHealthMonitor = backgroundHealthMonitor
+        } else if let sharedStore {
+            self.backgroundHealthMonitor = BackgroundHealthMonitor(
+                healthStore: sharedStore,
+                healthService: resolvedHealthService,
+                blockerService: resolvedBlockerService
+            )
+        } else {
+            self.backgroundHealthMonitor = MockBackgroundHealthMonitor()
+        }
+
+        // Start background health monitoring immediately.
+        // **Why here?** Observer queries and `enableBackgroundDelivery` registrations
+        // don't persist across app terminations. They must be re-registered on every
+        // launch. Starting in init ensures this happens as early as possible.
+        let monitor = self.backgroundHealthMonitor
+        Task {
+            await monitor.startMonitoring()
         }
     }
     
@@ -59,6 +101,7 @@ final class AppDependencyContainer: ObservableObject {
     static func preview(mockSteps: Int = 5_000, isBlocking: Bool = false) -> AppDependencyContainer {
         let mockHealth = MockHealthService()
         let mockBlocker = MockBlockerService()
+        let mockMonitor = MockBackgroundHealthMonitor()
         
         // Configure mocks asynchronously
         Task {
@@ -70,7 +113,8 @@ final class AppDependencyContainer: ObservableObject {
         
         return AppDependencyContainer(
             healthService: mockHealth,
-            blockerService: mockBlocker
+            blockerService: mockBlocker,
+            backgroundHealthMonitor: mockMonitor
         )
     }
 }

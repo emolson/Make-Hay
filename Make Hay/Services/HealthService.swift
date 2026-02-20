@@ -38,8 +38,13 @@ actor HealthService: HealthServiceProtocol {
     // MARK: - Initialization
     
     /// Creates a new HealthService instance.
+    /// - Parameter healthStore: An optional shared `HKHealthStore`. If nil, a new store is created.
     /// - Throws: `HealthServiceError.healthKitNotAvailable` if HealthKit is not available on this device.
-    init() throws {
+    ///
+    /// **Why accept an external store?** Apple recommends a single `HKHealthStore` per app.
+    /// Sharing the store with `BackgroundHealthMonitor` avoids duplicate connections to the
+    /// HealthKit daemon and keeps observer query registration consistent.
+    init(healthStore: HKHealthStore? = nil) throws {
         guard HKHealthStore.isHealthDataAvailable() else {
             throw HealthServiceError.healthKitNotAvailable
         }
@@ -53,7 +58,7 @@ actor HealthService: HealthServiceProtocol {
             throw HealthServiceError.healthKitNotAvailable
         }
         
-        self.healthStore = HKHealthStore()
+        self.healthStore = healthStore ?? HKHealthStore()
         self.stepType = stepType
         self.activeEnergyType = activeEnergyType
         self.exerciseTimeType = exerciseTimeType

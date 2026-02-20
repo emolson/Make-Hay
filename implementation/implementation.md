@@ -336,3 +336,30 @@ Implement the Daily Reset logic for "Make Hay".
    - `checkGoalStatus()` sees `0 < 10000`, calls `updateShields(shouldBlock: true)`.
    - Apps are blocked again.
 ```
+
+---
+
+### Slice 5: Background Health Delivery
+
+#### Story 8: HKObserverQuery & Background Delivery
+**Goal:** Close the HealthKit-to-Screen Time sync gap. When a user hits their step goal while the app is in the background, shields should lift automatically without requiring the user to open the app.
+
+**Problem:** The app only evaluates goals during `.scenePhase == .active`. If Apple Health records steps while Make Hay is backgrounded, shields remain up until the user manually opens the app.
+
+**Solution:** Register `HKObserverQuery` instances and call `enableBackgroundDelivery(for:frequency:)` for all tracked health types. When HealthKit writes new data, it wakes the app briefly, allowing goal evaluation and shield updates.
+
+**Architecture:**
+- **`BackgroundHealthMonitorProtocol`** (`Services/Protocols/`): Actor protocol with `startMonitoring()` and `stopMonitoring()` methods.
+- **`BackgroundHealthMonitor`** (`Services/`): Actor that owns the observer queries and coordinates evaluation:
+  1. On `startMonitoring()`, registers `HKObserverQuery` + `enableBackgroundDelivery` for `stepCount`, `activeEnergyBurned`, `appleExerciseTime`.
+  2. When an observer query fires, loads `HealthGoal` from `SharedStorage`, fetches fresh data via `HealthServiceProtocol`, evaluates via `GoalBlockingEvaluator.shouldBlock()`, and updates shields via `BlockerServiceProtocol.updateShields()`.
+  3. Fail-safe: if health data fetch fails, shields remain unchanged.
+- **`MockBackgroundHealthMonitor`** (`Mocks/`): Test double tracking call counts.
+- **Shared `HKHealthStore`**: `AppDependencyContainer` creates one store, injected into both `HealthService` and `BackgroundHealthMonitor`.
+
+**Entitlement:** Added `com.apple.developer.healthkit.background-delivery` to app entitlements.
+
+**Lifecycle:** `startMonitoring()` is called during `AppDependencyContainer.init()` because observer queries and `enableBackgroundDelivery` registrations do not persist across app terminations.
+
+**Frequency:** `.hourly` — Apple's most frequent background delivery cadence. When the app is in memory, observer queries fire more frequently (on each HealthKit write).
+```
