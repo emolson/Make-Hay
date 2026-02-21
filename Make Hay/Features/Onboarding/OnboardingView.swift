@@ -84,7 +84,7 @@ private struct WelcomeStepView: View {
             
             Image(systemName: "sun.max.fill")
                 .font(.system(size: 80))
-                .foregroundStyle(.yellow)
+                .foregroundStyle(Color.onboardingWelcome)
                 .accessibilityIdentifier("welcomeIcon")
             
             Text(String(localized: "Welcome to Make Hay"))
@@ -128,7 +128,7 @@ private struct HealthPermissionStepView: View {
             
             Image(systemName: isPermissionGranted ? "heart.fill" : "heart")
                 .font(.system(size: 80))
-                .foregroundStyle(isPermissionGranted ? .green : .red)
+                .foregroundStyle(isPermissionGranted ? Color.statusSuccess : Color.statusError)
                 .accessibilityIdentifier("healthIcon")
             
             Text(String(localized: "Connect Apple Health"))
@@ -191,7 +191,7 @@ private struct ScreenTimePermissionStepView: View {
             
             Image(systemName: isPermissionGranted ? "hourglass.badge.plus" : "hourglass")
                 .font(.system(size: 80))
-                .foregroundStyle(isPermissionGranted ? .green : .purple)
+                .foregroundStyle(isPermissionGranted ? Color.statusSuccess : Color.statusPermissionPending)
                 .accessibilityIdentifier("screenTimeIcon")
             
             Text(String(localized: "Enable Screen Time"))
@@ -249,7 +249,7 @@ private struct CompletionStepView: View {
             
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 80))
-                .foregroundStyle(.green)
+                .foregroundStyle(Color.statusSuccess)
                 .accessibilityIdentifier("completionIcon")
             
             Text(String(localized: "You're All Set!"))
@@ -291,7 +291,7 @@ private struct OnboardingButton: View {
             Group {
                 if isLoading {
                     ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .progressViewStyle(CircularProgressViewStyle(tint: Color.onboardingButtonContent))
                 } else {
                     Text(title)
                         .font(.headline)
@@ -300,7 +300,7 @@ private struct OnboardingButton: View {
             .frame(maxWidth: .infinity)
             .padding()
             .background(Color.accentColor)
-            .foregroundStyle(.white)
+            .foregroundStyle(Color.onboardingButtonContent)
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .disabled(isLoading)
@@ -313,15 +313,15 @@ private struct PermissionGrantedBadge: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+                .foregroundStyle(Color.statusSuccess)
             Text(String(localized: "Permission Granted"))
                 .font(.subheadline)
                 .fontWeight(.medium)
-                .foregroundStyle(.green)
+                .foregroundStyle(Color.statusSuccess)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(Color.green.opacity(0.1))
+        .background(Color.statusSuccess.opacity(0.1))
         .clipShape(Capsule())
     }
 }
@@ -334,23 +334,23 @@ private struct ErrorMessageView: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.red)
+                .foregroundStyle(Color.statusError)
             
             Text(message)
                 .font(.subheadline)
-                .foregroundStyle(.red)
+                .foregroundStyle(Color.statusError)
                 .multilineTextAlignment(.leading)
             
             Spacer()
             
             Button(action: onDismiss) {
                 Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.red.opacity(0.7))
+                    .foregroundStyle(Color.statusError.opacity(0.7))
             }
             .accessibilityLabel(String(localized: "Dismiss error"))
         }
         .padding()
-        .background(Color.red.opacity(0.1))
+        .background(Color.statusError.opacity(0.1))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal, 24)
     }

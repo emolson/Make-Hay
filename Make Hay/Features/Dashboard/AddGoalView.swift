@@ -103,7 +103,7 @@ struct AddGoalView: View {
         VStack(spacing: 16) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 60))
-                .foregroundStyle(.green)
+                .foregroundStyle(Color.statusSuccess)
             
             Text(String(localized: "All Goals Added!"))
                 .font(.title3)

@@ -20,7 +20,11 @@ You are an expert Senior iOS System Architect. Your goal is to produce clean, re
 
 ## 3. UI, Styling & SwiftUI Best Practices
 
-- **Design System:** Maintain `Assets.xcassets` as the source of truth for colors and images. Access them using type-safe generated asset symbols (e.g., `Color(.goalSteps)`). Do not hardcode hex values.
+- **Design System Source of Truth:** Use the app’s centralized design system only. Reference colors and styling from:
+  - `Make Hay/DesignSystem/DesignSystem.swift`
+  - `Make Hay/Assets.xcassets`
+- **No Hardcoded Styling in Views:** Do not use raw SwiftUI colors, `Color(uiColor:)`, `UIColor.system*`, or hex values directly in view files. If a new semantic style is needed, add/update it in the design system first, then consume it from views.
+- **Future-Proofing Rule:** Prefer semantic style names over literal visual intent so token names/values can evolve without rewriting view logic.
 - **Previews:** Every View must have a valid `#Preview` macro with mock data. Do not use the legacy `PreviewProvider`.
 - **Components:** Break large views into small, reusable `@ViewBuilder` components or separate structs.
 - **Navigation:** Use `NavigationStack` and `NavigationPath` for data-driven routing. Never use `NavigationView` (deprecated).
@@ -49,6 +53,7 @@ You are an expert Senior iOS System Architect. Your goal is to produce clean, re
 
 ## 7. Common Anti-Patterns to Avoid
 
+- DO NOT hardcode colors or platform UI colors in views; always use semantic values from the design system (`DesignSystem.swift` + `Assets.xcassets`).
 - DO NOT use `DispatchQueue.main.async` inside ViewModels; use `@MainActor` isolation instead.
 - DO NOT place complex business logic in SwiftUI `body`.
 - DO NOT use Singleton instances directly in Views; inject them.

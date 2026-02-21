@@ -13,6 +13,24 @@ protocol GoalStatusProvider: AnyObject {
     var isBlocking: Bool { get }
 }
 
+/// Protocol exposing weekly schedule goal-editing capabilities to feature views/ViewModels.
+///
+/// **Why a protocol?** Keeps feature modules decoupled from the concrete
+/// `DashboardViewModel` implementation while preserving a single source of truth.
+@MainActor
+protocol ScheduleGoalManaging: AnyObject {
+    var weeklySchedule: WeeklyGoalSchedule { get }
+    var todayWeekday: Int { get }
+
+    func updateBlockingStrategy(_ strategy: BlockingStrategy, forWeekday weekday: Int) async
+    func schedulePendingGoal(_ newGoal: HealthGoal, forWeekday weekday: Int?)
+    func applyEmergencyChange(_ newGoal: HealthGoal) async
+    func shouldDeferGoalEdits() async -> Bool
+    func updateGoal(type: GoalType, target: Double, exerciseGoalId: UUID?, exerciseType: ExerciseType, forWeekday weekday: Int) async
+    func addGoal(type: GoalType, target: Double, exerciseType: ExerciseType, forWeekday weekday: Int) async
+    func removeGoal(type: GoalType, exerciseGoalId: UUID?, forWeekday weekday: Int) async
+}
+
 /// Supported goal types for dashboard display.
 enum GoalType: String, Sendable, CaseIterable, Identifiable {
     case steps
@@ -89,7 +107,7 @@ struct GoalProgress: Identifiable, Sendable, Equatable {
 /// dispatched to the main thread, preventing data races.
 @Observable
 @MainActor
-final class DashboardViewModel: GoalStatusProvider {
+final class DashboardViewModel: GoalStatusProvider, ScheduleGoalManaging {
     
     // MARK: - State
     
@@ -103,8 +121,21 @@ final class DashboardViewModel: GoalStatusProvider {
     /// Stores exercise minutes by goal ID.
     var currentExerciseMinutes: [UUID: Int] = [:]
     
-    /// The user's goal configuration, refreshed from storage on appearance.
-    var healthGoal: HealthGoal = HealthGoal.load()
+    /// The user's weekly goal schedule, containing a `HealthGoal` per weekday.
+    /// **Why weekly?** Allows different goals on different days (e.g., rest on weekends).
+    var weeklySchedule: WeeklyGoalSchedule = WeeklyGoalSchedule.load()
+
+    /// The current weekday (1 = Sunday … 7 = Saturday).
+    /// Re-derived on new-day detection so `healthGoal` always reflects today.
+    var todayWeekday: Int = Calendar.current.component(.weekday, from: Date())
+
+    /// Convenience accessor for today's goal configuration.
+    /// **Why computed?** All existing code reads `healthGoal`; this keeps the diff minimal
+    /// while routing through the weekly schedule. Writes go through `setTodayGoal(_:)`.
+    var healthGoal: HealthGoal {
+        get { weeklySchedule.goal(for: todayWeekday) }
+        set { weeklySchedule.setGoal(newValue, for: todayWeekday) }
+    }
     
     /// Indicates whether a data fetch is in progress.
     var isLoading: Bool = false
@@ -354,7 +385,7 @@ final class DashboardViewModel: GoalStatusProvider {
             healthGoal.timeBlockGoal.unlockTimeMinutes = Int(target)
         }
         
-        HealthGoal.save(healthGoal)
+        saveSchedule()
         isShowingAddGoal = false
         
         // Reload to fetch data for the newly added goal
@@ -381,7 +412,7 @@ final class DashboardViewModel: GoalStatusProvider {
             healthGoal.timeBlockGoal.isEnabled = false
         }
         
-        HealthGoal.save(healthGoal)
+        saveSchedule()
         scheduleTimeUnlockIfNeeded()
         
         // Re-check blocking status after removing a goal
@@ -412,7 +443,7 @@ final class DashboardViewModel: GoalStatusProvider {
             healthGoal.timeBlockGoal.unlockTimeMinutes = Int(target)
         }
         
-        HealthGoal.save(healthGoal)
+        saveSchedule()
         
         // Ensure time-based goals are rescheduled and blocking status is refreshed
         scheduleTimeUnlockIfNeeded()
@@ -424,18 +455,32 @@ final class DashboardViewModel: GoalStatusProvider {
     /// apps should be blocked based on the new logic (any vs all).
     func updateBlockingStrategy(_ strategy: BlockingStrategy) async {
         healthGoal.blockingStrategy = strategy
-        HealthGoal.save(healthGoal)
+        saveSchedule()
         await checkGoalStatus()
     }
     
-    /// Schedules a goal change to take effect at midnight tomorrow.
-    /// **Why tomorrow?** Removes the immediate gratification of lowering goals to bypass blocking.
-    /// The user can still adjust their goals, but won't unlock apps until they're truly earned.
-    /// - Parameter newGoal: The proposed goal configuration to apply tomorrow
-    func schedulePendingGoal(_ newGoal: HealthGoal) {
-        healthGoal.pendingGoal = PendingHealthGoal(from: newGoal)
-        healthGoal.pendingGoalEffectiveDate = Date.localMidnightTomorrow()
-        HealthGoal.save(healthGoal)
+    /// Schedules a goal change to take effect at the next occurrence of the target weekday.
+    ///
+    /// **Why weekday-aware?** The weekly schedule allows editing future days directly.
+    /// When editing today while blocked, the change is deferred to the *next* occurrence
+    /// of today (7 days later), extending the existing "Next-Day Effect" to the weekly model.
+    ///
+    /// - Parameters:
+    ///   - newGoal: The proposed goal configuration to apply.
+    ///   - weekday: The weekday this change targets (defaults to `todayWeekday`).
+    func schedulePendingGoal(_ newGoal: HealthGoal, forWeekday weekday: Int? = nil) {
+        let targetWeekday = weekday ?? todayWeekday
+        var dayGoal = weeklySchedule.goal(for: targetWeekday)
+        dayGoal.pendingGoal = PendingHealthGoal(from: newGoal)
+        if targetWeekday == todayWeekday {
+            // Editing today while blocked → defer to next occurrence (7 days)
+            dayGoal.pendingGoalEffectiveDate = Date.nextOccurrence(of: targetWeekday)
+        } else {
+            // Editing a future day → defer to next midnight of that weekday
+            dayGoal.pendingGoalEffectiveDate = Date.nextOccurrence(of: targetWeekday)
+        }
+        weeklySchedule.setGoal(dayGoal, for: targetWeekday)
+        saveSchedule()
     }
     
     /// Applies an emergency goal change immediately, bypassing the next-day rule.
@@ -453,19 +498,19 @@ final class DashboardViewModel: GoalStatusProvider {
         healthGoal.pendingGoal = nil
         healthGoal.pendingGoalEffectiveDate = nil
         
-        HealthGoal.save(healthGoal)
+        saveSchedule()
         
         // Update blocking status with the new goal
         scheduleTimeUnlockIfNeeded()
         await checkGoalStatus()
     }
     
-    /// Cancels any pending goal changes.
-    /// **Why expose this?** Allows users to change their mind before tomorrow arrives.
+    /// Cancels any pending goal changes for today.
+    /// **Why expose this?** Allows users to change their mind before the change takes effect.
     func cancelPendingGoal() {
         healthGoal.pendingGoal = nil
         healthGoal.pendingGoalEffectiveDate = nil
-        HealthGoal.save(healthGoal)
+        saveSchedule()
     }
 
     /// Returns whether easier goal edits should be deferred behind the pending-change flow.
@@ -473,14 +518,123 @@ final class DashboardViewModel: GoalStatusProvider {
     /// **Why fresh evaluation?** Goal edits are a high-impact path. We evaluate with
     /// current Health data at action time to avoid stale UI state bypassing the gate.
     func shouldDeferGoalEdits() async -> Bool {
-        let latestGoal = HealthGoal.load()
+        let latestSchedule = WeeklyGoalSchedule.load()
+        let latestGoal = latestSchedule.goal(for: todayWeekday)
         return await GoalGatekeeper.shouldDeferEdits(
             goal: latestGoal,
             healthService: healthService
         )
     }
+
+    // MARK: - Weekday-Aware Goal Editing
+
+    /// Adds a goal for a specific weekday.
+    ///
+    /// **Why a separate overload?** When editing a future day's schedule, the operation
+    /// should target that day's `HealthGoal` rather than today's. Future-day edits skip
+    /// the deferral gate entirely because they don't affect the currently-active blocking.
+    func addGoal(type: GoalType, target: Double, exerciseType: ExerciseType = .any, forWeekday weekday: Int) async {
+        var dayGoal = weeklySchedule.goal(for: weekday)
+        switch type {
+        case .steps:
+            dayGoal.stepGoal.isEnabled = true
+            dayGoal.stepGoal.target = Int(target)
+        case .activeEnergy:
+            dayGoal.activeEnergyGoal.isEnabled = true
+            dayGoal.activeEnergyGoal.target = Int(target)
+        case .exercise:
+            let newExerciseGoal = ExerciseGoal(
+                isEnabled: true,
+                targetMinutes: Int(target),
+                exerciseType: exerciseType
+            )
+            dayGoal.exerciseGoals.append(newExerciseGoal)
+        case .timeUnlock:
+            dayGoal.timeBlockGoal.isEnabled = true
+            dayGoal.timeBlockGoal.unlockTimeMinutes = Int(target)
+        }
+        weeklySchedule.setGoal(dayGoal, for: weekday)
+        saveSchedule()
+
+        // If editing today, reload live data and blocking
+        if weekday == todayWeekday {
+            isShowingAddGoal = false
+            await loadGoals()
+        }
+    }
+
+    /// Removes a goal for a specific weekday.
+    func removeGoal(type: GoalType, exerciseGoalId: UUID? = nil, forWeekday weekday: Int) async {
+        var dayGoal = weeklySchedule.goal(for: weekday)
+        switch type {
+        case .steps:
+            dayGoal.stepGoal.isEnabled = false
+        case .activeEnergy:
+            dayGoal.activeEnergyGoal.isEnabled = false
+        case .exercise:
+            if let exerciseGoalId {
+                dayGoal.exerciseGoals.removeAll { $0.id == exerciseGoalId }
+            }
+        case .timeUnlock:
+            dayGoal.timeBlockGoal.isEnabled = false
+        }
+        weeklySchedule.setGoal(dayGoal, for: weekday)
+        saveSchedule()
+        scheduleTimeUnlockIfNeeded()
+
+        if weekday == todayWeekday {
+            await checkGoalStatus()
+        }
+    }
+
+    /// Updates an existing goal for a specific weekday.
+    func updateGoal(type: GoalType, target: Double, exerciseGoalId: UUID? = nil, exerciseType: ExerciseType = .any, forWeekday weekday: Int) async {
+        var dayGoal = weeklySchedule.goal(for: weekday)
+        switch type {
+        case .steps:
+            dayGoal.stepGoal.target = Int(target)
+        case .activeEnergy:
+            dayGoal.activeEnergyGoal.target = Int(target)
+        case .exercise:
+            if let exerciseGoalId,
+               let index = dayGoal.exerciseGoals.firstIndex(where: { $0.id == exerciseGoalId }) {
+                dayGoal.exerciseGoals[index].targetMinutes = Int(target)
+                dayGoal.exerciseGoals[index].exerciseType = exerciseType
+            }
+        case .timeUnlock:
+            dayGoal.timeBlockGoal.unlockTimeMinutes = Int(target)
+        }
+        weeklySchedule.setGoal(dayGoal, for: weekday)
+        saveSchedule()
+        scheduleTimeUnlockIfNeeded()
+
+        if weekday == todayWeekday {
+            await checkGoalStatus()
+        }
+    }
+
+    /// Updates the blocking strategy for a specific weekday.
+    func updateBlockingStrategy(_ strategy: BlockingStrategy, forWeekday weekday: Int) async {
+        var dayGoal = weeklySchedule.goal(for: weekday)
+        dayGoal.blockingStrategy = strategy
+        weeklySchedule.setGoal(dayGoal, for: weekday)
+        saveSchedule()
+
+        if weekday == todayWeekday {
+            await checkGoalStatus()
+        }
+    }
     
     // MARK: - Private Methods
+
+    /// Persists the weekly schedule to App Group UserDefaults.
+    ///
+    /// **Why centralize?** Every mutation site calls this instead of `HealthGoal.save`.
+    /// The schedule's save method also keeps the legacy `healthGoalData` key in sync
+    /// for the DeviceActivityMonitor extension.
+    private func saveSchedule() {
+        WeeklyGoalSchedule.save(weeklySchedule)
+    }
     
     /// Checks if a new day has started and resets the blocking state if necessary.
     /// **Why this matters?** At midnight, the step count resets to 0, but the app might
@@ -494,6 +648,8 @@ final class DashboardViewModel: GoalStatusProvider {
         // If stored day differs from today, it's a new day
         if lastCheckedDayNumber != currentDayNumber {
             lastCheckedDayNumber = currentDayNumber
+            // Re-derive todayWeekday so subsequent reads of `healthGoal` return the new day's config
+            todayWeekday = Calendar.current.component(.weekday, from: Date())
             // Reset current steps to force a fresh check
             // The subsequent fetchDailySteps() will get today's actual (likely low) count
             // and checkGoalStatus() will re-engage blocking if needed
@@ -534,30 +690,51 @@ final class DashboardViewModel: GoalStatusProvider {
     /// @AppStorage. We read it here to ensure the dashboard always reflects the latest
     /// goal, even if the user changes it in Settings without restarting the app.
     private func refreshGoalFromStorage() {
-        healthGoal = HealthGoal.load()
+        weeklySchedule = WeeklyGoalSchedule.load()
+        todayWeekday = Calendar.current.component(.weekday, from: Date())
         
-        // Apply pending changes if the effective date has passed
-        if healthGoal.applyPendingIfReady() {
-            HealthGoal.save(healthGoal)
+        // Apply pending changes for all days whose effective date has passed
+        var didApplyAny = false
+        for weekday in 1...7 {
+            var dayGoal = weeklySchedule.goal(for: weekday)
+            if dayGoal.applyPendingIfReady() {
+                weeklySchedule.setGoal(dayGoal, for: weekday)
+                didApplyAny = true
+            }
+        }
+        if didApplyAny {
+            saveSchedule()
         }
         
         scheduleTimeUnlockIfNeeded()
     }
 
+    /// Schedules per-weekday unlock monitors for all days that have a time-block goal enabled.
+    ///
+    /// **Why schedule all 7 at once?** The OS needs to know the unlock time for every weekday
+    /// ahead of time. We rebuild the full set on every save/refresh so removed or changed
+    /// days are immediately reflected.
     private func scheduleTimeUnlockIfNeeded() {
-        timeUnlockScheduler.cancelDailyUnlock()
-
-        guard healthGoal.timeBlockGoal.isEnabled else {
-            return
+        // Build entries for every day that has a time-block goal enabled
+        var entries: [WeekdayUnlockEntry] = []
+        for weekday in 1...7 {
+            let dayGoal = weeklySchedule.goal(for: weekday)
+            if dayGoal.timeBlockGoal.isEnabled {
+                let minutes = dayGoal.timeBlockGoal.clampedUnlockMinutes
+                if minutes > 0 {
+                    entries.append(WeekdayUnlockEntry(weekday: weekday, unlockMinutes: minutes))
+                }
+            }
         }
 
-        let unlockMinutes = healthGoal.timeBlockGoal.clampedUnlockMinutes
-        guard unlockMinutes > 0 else {
+        if entries.isEmpty {
+            timeUnlockScheduler.cancelWeeklyUnlocks()
+            timeUnlockScheduler.cancelDailyUnlock()
             return
         }
 
         do {
-            try timeUnlockScheduler.scheduleDailyUnlock(at: unlockMinutes)
+            try timeUnlockScheduler.scheduleWeeklyUnlocks(entries)
         } catch {
             errorMessage = error.localizedDescription
         }

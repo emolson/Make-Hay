@@ -68,13 +68,13 @@ struct GoalProgressRowView: View {
         ZStack(alignment: .bottomTrailing) {
             Image(systemName: progress.exerciseType?.iconName ?? progress.type.iconName)
                 .font(.subheadline)
-                .foregroundStyle(progress.isMet ? .green : progress.type.color)
+                .foregroundStyle(progress.isMet ? Color.statusSuccess : progress.type.color)
                 .frame(width: 24, height: 24, alignment: .center)
 
             if progress.isMet {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 10))
-                    .foregroundStyle(.green)
+                    .foregroundStyle(Color.statusSuccess)
                     .offset(x: 4, y: 4)
             }
         }
@@ -86,7 +86,7 @@ struct GoalProgressRowView: View {
             EmptyView()
         }
         .gaugeStyle(.linearCapacity)
-        .tint(progress.isMet ? .green : progress.type.color)
+        .tint(progress.isMet ? Color.statusSuccess : progress.type.color)
         .animation(.spring(response: 0.5, dampingFraction: 0.8), value: progress.progress)
     }
 

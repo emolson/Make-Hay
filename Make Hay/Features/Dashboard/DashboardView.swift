@@ -36,6 +36,9 @@ struct DashboardView: View {
     
     /// Tracks the goal currently being edited (nil when not editing).
     @State private var editingGoal: GoalProgress?
+
+    /// Controls presentation of the weekly schedule sheet.
+    @State private var isShowingSchedule: Bool = false
     
     // MARK: - Initialization
     
@@ -51,16 +54,16 @@ struct DashboardView: View {
         NavigationStack {
             content
                 .navigationTitle(String(localized: "Make Hay"))
+                .background(Color.surfaceGrouped)
                 .toolbar {
-                    if viewModel.canAddMoreGoals && !viewModel.goalProgresses.isEmpty {
-                        ToolbarItem(placement: .primaryAction) {
-                            Button {
-                                viewModel.isShowingAddGoal = true
-                            } label: {
-                                Label(String(localized: "Add Goal"), systemImage: "plus.circle.fill")
-                            }
-                            .accessibilityIdentifier("addGoalButton")
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            isShowingSchedule = true
+                        } label: {
+                            Image(systemName: "calendar")
                         }
+                        .accessibilityIdentifier("weeklyScheduleButton")
+                        .accessibilityLabel(String(localized: "Weekly Schedule"))
                     }
                 }
                 .sheet(isPresented: $viewModel.isShowingAddGoal) {
@@ -68,6 +71,13 @@ struct DashboardView: View {
                 }
                 .sheet(item: $editingGoal) { goal in
                     editGoalSheet(for: goal)
+                }
+                .sheet(isPresented: $isShowingSchedule) {
+                    WeeklyScheduleView(
+                        viewModel: WeeklyScheduleViewModel(
+                            dashboardViewModel: viewModel
+                        )
+                    )
                 }
                 .task {
                     await viewModel.onAppear()
@@ -124,28 +134,47 @@ struct DashboardView: View {
     
     private var goalsView: some View {
         ScrollView {
-            VStack(spacing: 16) {
-                // Pending goal change banner
-                if viewModel.healthGoal.pendingGoal != nil {
-                    pendingChangeBanner
-                }
-                
-                // Inline celebration banner when all goals are met
-                if viewModel.isGoalMet {
-                    goalMetBanner
+            VStack(spacing: 24) {
+                // Banners Section
+                VStack(spacing: 12) {
+                    if viewModel.healthGoal.pendingGoal != nil {
+                        pendingChangeBanner
+                    }
+                    
+                    if viewModel.isGoalMet {
+                        goalMetBanner
+                    }
                 }
                 
                 if viewModel.goalProgresses.isEmpty {
                     emptyGoalsDisplay
                 } else {
-                    goalProgressRows
+                    // Goals Section
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(String(localized: "YOUR GOALS"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 16)
+                        
+                        goalProgressRows
+                    }
+                    
+                    // Unlock Strategy Section
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(String(localized: "UNLOCK WHEN"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 16)
+                        
+                        blockingStrategyCard
+                    }
                 }
                 
                 if viewModel.isBlocking {
                     blockingStatusBadge
                 }
             }
-            .padding()
+            .padding(.vertical, 24)
         }
         .refreshable {
             await viewModel.loadGoals()
@@ -185,20 +214,78 @@ struct DashboardView: View {
         .padding(.vertical)
     }
     
-    /// Vertically stacked linear progress bars, one per enabled goal.
-    /// **Why ForEach + GoalProgressRowView?** Each row is self-contained with
-    /// its own Gauge, formatting, and accessibility — scales to any goal count.
+    /// Vertically stacked linear progress bars, one per enabled goal, inside a grouped card.
+    /// **Why a card layout?** Groups related items visually, matching modern iOS Settings
+    /// and Health app aesthetics. The inline "Add Goal" button is more discoverable
+    /// and ergonomic than a top-right toolbar button.
     private var goalProgressRows: some View {
-        VStack(spacing: 4) {
-            ForEach(viewModel.goalProgresses) { goal in
+        VStack(spacing: 0) {
+            ForEach(Array(viewModel.goalProgresses.enumerated()), id: \.element.id) { index, goal in
                 GoalProgressRowView(progress: goal) {
                     editingGoal = goal
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                
+                if index < viewModel.goalProgresses.count - 1 || viewModel.canAddMoreGoals {
+                    Divider()
+                        .padding(.leading, 56) // Align with text, skipping icon
+                }
             }
             
-            // Blocking strategy picker
-            blockingStrategyPicker
+            if viewModel.canAddMoreGoals {
+                Button {
+                    viewModel.isShowingAddGoal = true
+                } label: {
+                    HStack(spacing: 16) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(Color.statusSuccess)
+                            .frame(width: 24, height: 24)
+                        
+                        Text(String(localized: "Add Goal"))
+                            .font(.body)
+                            .foregroundStyle(.primary)
+                        
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("inlineAddGoalButton")
+            }
         }
+        .background(Color.surfaceCard)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 16)
+    }
+    
+    /// Card containing the picker for selecting the blocking strategy (any vs all goals).
+    /// **Why a separate card?** Separates the "What are my goals?" from "How do they affect my phone?"
+    /// making the UI hierarchy clearer.
+    private var blockingStrategyCard: some View {
+        VStack(spacing: 0) {
+            Picker(String(localized: "Unlock when"), selection: Binding(
+                get: { viewModel.healthGoal.blockingStrategy },
+                set: { newValue in
+                    Task {
+                        await viewModel.updateBlockingStrategy(newValue)
+                    }
+                }
+            )) {
+                ForEach(BlockingStrategy.allCases) { strategy in
+                    Text(strategy.displayName).tag(strategy)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(16)
+            .accessibilityIdentifier("blockingStrategyPicker")
+        }
+        .background(Color.surfaceCard)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 16)
     }
     
     /// Inline celebration banner shown when all goals are met.
@@ -209,12 +296,12 @@ struct DashboardView: View {
         HStack(spacing: 12) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.title2)
-                .foregroundStyle(.green)
+                .foregroundStyle(Color.statusSuccess)
             
             VStack(alignment: .leading, spacing: 2) {
                 Text(String(localized: "Goals Met!"))
                     .font(.headline)
-                    .foregroundStyle(.green)
+                    .foregroundStyle(Color.statusSuccess)
                 
                 Text(String(localized: "Apps Unlocked"))
                     .font(.subheadline)
@@ -224,29 +311,9 @@ struct DashboardView: View {
             Spacer()
         }
         .padding()
-        .background(Color.green.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color.statusSuccess.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 16)
         .accessibilityIdentifier("goalMetBanner")
-    }
-    
-    /// Picker for selecting the blocking strategy (any vs all goals).
-    /// **Why here?** The blocking strategy is tightly coupled to goal logic,
-    /// so it belongs in the Dashboard near the goals rather than buried in Settings.
-    private var blockingStrategyPicker: some View {
-        Picker(String(localized: "Unlock when"), selection: Binding(
-            get: { viewModel.healthGoal.blockingStrategy },
-            set: { newValue in
-                Task {
-                    await viewModel.updateBlockingStrategy(newValue)
-                }
-            }
-        )) {
-            ForEach(BlockingStrategy.allCases) { strategy in
-                Text(strategy.displayName).tag(strategy)
-            }
-        }
-        .pickerStyle(.segmented)
-        .padding(.top, 8)
-        .accessibilityIdentifier("blockingStrategyPicker")
     }
     
     /// Banner shown when a goal change is scheduled for tomorrow.
@@ -255,7 +322,7 @@ struct DashboardView: View {
         HStack(spacing: 12) {
             Image(systemName: "calendar.badge.clock")
                 .font(.title3)
-                .foregroundStyle(.blue)
+                .foregroundStyle(Color.statusInfo)
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(String(localized: "Goal Update Scheduled"))
@@ -283,7 +350,8 @@ struct DashboardView: View {
             .accessibilityIdentifier("cancelPendingButton")
         }
         .padding()
-        .background(Color.blue.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color.statusInfo.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 16)
         .accessibilityIdentifier("pendingChangeBanner")
     }
     
@@ -320,7 +388,7 @@ struct DashboardView: View {
                 .font(.subheadline)
                 .fontWeight(.medium)
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(Color.onboardingButtonContent)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(Color.statusBlocked.gradient, in: Capsule())

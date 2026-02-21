@@ -48,14 +48,21 @@ struct GoalConfigurationView: View {
     
     // MARK: - State
     
-    /// Non-owned reference to the shared dashboard ViewModel.
+    /// Non-owned reference to the shared goal manager.
     /// **Why `let` instead of `@State`?** This view does not own the ViewModel — it is
     /// created by `DashboardView` and passed in. Using `@State` for a non-owned
     /// `@Observable` reference can cause lifecycle issues where the first `Task`
     /// capture receives a stale wrapper, bypassing the gate on initial presentation.
-    let viewModel: DashboardViewModel
+    let viewModel: any ScheduleGoalManaging
     let goalType: GoalType
     let mode: GoalConfigurationMode
+
+    /// The weekday (1–7) this configuration targets.
+    /// Defaults to `todayWeekday` for Dashboard edits; set explicitly for schedule edits.
+    ///
+    /// **Why a stored property?** Future-day edits skip the deferral gate and route to
+    /// weekday-aware ViewModel methods, so the view needs to know which day it's editing.
+    let weekday: Int
     
     @State private var targetValue: Double
     @State private var selectedExerciseType: ExerciseType = .any
@@ -71,16 +78,19 @@ struct GoalConfigurationView: View {
     /// sheet on first presentation. `.sheet(item:)` guarantees the data is
     /// available when the sheet content closure runs.
     @State private var pendingProposal: PendingGoalProposal?
+
+    /// Whether this view is editing today's goal (and therefore subject to deferral rules).
+    private var isEditingToday: Bool { weekday == viewModel.todayWeekday }
     
     // MARK: - Initialization
     
-    /// Creates a GoalConfigurationView for adding a new goal.
+    /// Creates a GoalConfigurationView for adding a new goal (today).
     /// Pre-fills with existing values if the goal was previously configured.
     /// - Parameters:
     ///   - viewModel: The ViewModel managing dashboard state.
     ///   - goalType: The type of goal being configured.
-    init(viewModel: DashboardViewModel, goalType: GoalType) {
-        self.init(viewModel: viewModel, goalType: goalType, mode: .add)
+    init(viewModel: any ScheduleGoalManaging, goalType: GoalType) {
+        self.init(viewModel: viewModel, goalType: goalType, mode: .add, weekday: viewModel.todayWeekday)
     }
     
     /// Creates a GoalConfigurationView for adding or editing a goal.
@@ -89,27 +99,38 @@ struct GoalConfigurationView: View {
     ///   - goalType: The type of goal being configured.
     ///   - mode: Whether adding a new goal or editing an existing one.
     ///   - exerciseGoal: The specific exercise goal being edited (for exercise goals only).
-    init(viewModel: DashboardViewModel, goalType: GoalType, mode: GoalConfigurationMode, exerciseGoal: ExerciseGoal? = nil) {
+    ///   - weekday: The weekday this edit targets (1–7). Defaults to today.
+    init(
+        viewModel: any ScheduleGoalManaging,
+        goalType: GoalType,
+        mode: GoalConfigurationMode,
+        exerciseGoal: ExerciseGoal? = nil,
+        weekday: Int? = nil
+    ) {
         self.viewModel = viewModel
         self.goalType = goalType
         self.mode = mode
+        self.weekday = weekday ?? viewModel.todayWeekday
+
+        // Resolve the goal for the target weekday (may differ from today)
+        let dayGoal = viewModel.weeklySchedule.goal(for: self.weekday)
         
         // Initialize unlockTime with a default (only used for .timeUnlock goals)
-        let defaultUnlockTime = viewModel.healthGoal.timeBlockGoal.unlockDate()
+        let defaultUnlockTime = dayGoal.timeBlockGoal.unlockDate()
         _unlockTime = State(initialValue: defaultUnlockTime)
         
         // Pre-fill based on mode
         switch goalType {
         case .steps:
-            _targetValue = State(initialValue: Double(viewModel.healthGoal.stepGoal.target))
+            _targetValue = State(initialValue: Double(dayGoal.stepGoal.target))
         case .activeEnergy:
-            _targetValue = State(initialValue: Double(viewModel.healthGoal.activeEnergyGoal.target))
+            _targetValue = State(initialValue: Double(dayGoal.activeEnergyGoal.target))
         case .exercise:
             if let exerciseGoal {
                 // Editing a specific exercise goal
                 _targetValue = State(initialValue: Double(exerciseGoal.targetMinutes))
                 _selectedExerciseType = State(initialValue: exerciseGoal.exerciseType)
-            } else if let lastExerciseGoal = viewModel.healthGoal.exerciseGoals.last {
+            } else if let lastExerciseGoal = dayGoal.exerciseGoals.last {
                 // Adding new - use last exercise goal as template
                 _targetValue = State(initialValue: Double(lastExerciseGoal.targetMinutes))
                 _selectedExerciseType = State(initialValue: lastExerciseGoal.exerciseType)
@@ -119,7 +140,7 @@ struct GoalConfigurationView: View {
                 _selectedExerciseType = State(initialValue: .any)
             }
         case .timeUnlock:
-            _targetValue = State(initialValue: Double(viewModel.healthGoal.timeBlockGoal.unlockTimeMinutes))
+            _targetValue = State(initialValue: Double(dayGoal.timeBlockGoal.unlockTimeMinutes))
         }
     }
     
@@ -210,9 +231,13 @@ struct GoalConfigurationView: View {
             Text(String(localized: "Are you sure you want to remove this goal? This cannot be undone."))
         }
         .sheet(item: $pendingProposal) { proposal in
-            PendingGoalChangeView(context: .goalChange) {
-                // Schedule for tomorrow
-                viewModel.schedulePendingGoal(proposal.goal)
+            PendingGoalChangeView(
+                context: .goalChange(
+                    targetDayName: WeeklyGoalSchedule.fullName(for: weekday)
+                )
+            ) {
+                // Schedule for next occurrence of this weekday
+                viewModel.schedulePendingGoal(proposal.goal, forWeekday: weekday)
                 dismiss()
             } onEmergencyUnlock: {
                 // Apply immediately via emergency unlock
@@ -331,8 +356,9 @@ struct GoalConfigurationView: View {
         isSaving = true
         
         Task {
-            // Build the proposed goal configuration
-            var newGoal = viewModel.healthGoal
+            // Build the proposed goal configuration from the target weekday's goal
+            let currentDayGoal = viewModel.weeklySchedule.goal(for: weekday)
+            var newGoal = currentDayGoal
             
             if mode.isEditing {
                 // Update existing goal
@@ -373,26 +399,37 @@ struct GoalConfigurationView: View {
             }
             
             // Determine the intent of this change
-            let intent = GoalChangeIntent.determine(original: viewModel.healthGoal, proposed: newGoal)
-            let shouldDefer = intent == .easier
-                ? await viewModel.shouldDeferGoalEdits()
-                : false
+            let intent = GoalChangeIntent.determine(original: currentDayGoal, proposed: newGoal)
+
+            // Only defer edits when editing today — future days aren't actively blocking
+            let shouldDefer: Bool
+            if isEditingToday && intent == .easier {
+                shouldDefer = await viewModel.shouldDeferGoalEdits()
+            } else {
+                shouldDefer = false
+            }
             
             // If making goal easier while apps are blocked, show confirmation
             if shouldDefer {
                 pendingProposal = PendingGoalProposal(goal: newGoal)
                 isSaving = false
             } else {
-                // Apply immediately for harder goals or when not blocking
+                // Apply immediately for harder goals, future days, or when not blocking
                 if mode.isEditing {
                     await viewModel.updateGoal(
                         type: goalType,
                         target: targetValue,
                         exerciseGoalId: mode.exerciseGoalId,
-                        exerciseType: selectedExerciseType
+                        exerciseType: selectedExerciseType,
+                        forWeekday: weekday
                     )
                 } else {
-                    await viewModel.addGoal(type: goalType, target: targetValue, exerciseType: selectedExerciseType)
+                    await viewModel.addGoal(
+                        type: goalType,
+                        target: targetValue,
+                        exerciseType: selectedExerciseType,
+                        forWeekday: weekday
+                    )
                 }
                 
                 triggerSuccessHaptic = true
@@ -407,7 +444,8 @@ struct GoalConfigurationView: View {
     private func removeGoal() {
         Task {
             // Build the proposed goal configuration with the goal removed
-            var newGoal = viewModel.healthGoal
+            let currentDayGoal = viewModel.weeklySchedule.goal(for: weekday)
+            var newGoal = currentDayGoal
             switch goalType {
             case .steps:
                 newGoal.stepGoal.isEnabled = false
@@ -422,16 +460,25 @@ struct GoalConfigurationView: View {
             }
             
             // Determine intent (removal is always "easier")
-            let intent = GoalChangeIntent.determine(original: viewModel.healthGoal, proposed: newGoal)
-            let shouldDefer = intent == .easier
-                ? await viewModel.shouldDeferGoalEdits()
-                : false
+            let intent = GoalChangeIntent.determine(original: currentDayGoal, proposed: newGoal)
+
+            // Only defer when editing today
+            let shouldDefer: Bool
+            if isEditingToday && intent == .easier {
+                shouldDefer = await viewModel.shouldDeferGoalEdits()
+            } else {
+                shouldDefer = false
+            }
             
-            // If removing while blocked, schedule for tomorrow or require emergency override
+            // If removing while blocked on today, schedule or require emergency override
             if shouldDefer {
                 pendingProposal = PendingGoalProposal(goal: newGoal)
             } else {
-                await viewModel.removeGoal(type: goalType, exerciseGoalId: mode.exerciseGoalId)
+                await viewModel.removeGoal(
+                    type: goalType,
+                    exerciseGoalId: mode.exerciseGoalId,
+                    forWeekday: weekday
+                )
                 dismiss()
             }
         }

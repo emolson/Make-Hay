@@ -9,7 +9,9 @@ import SwiftUI
 
 /// Context describing which guarded change flow is being confirmed.
 enum PendingChangeContext {
-    case goalChange
+    /// A goal is being made easier. The associated `targetDayName` is the full weekday
+    /// name (e.g. "Monday") so the UI can say "Schedule for next Monday".
+    case goalChange(targetDayName: String? = nil)
     case blockedAppsChange
 
     var navigationTitle: String {
@@ -32,7 +34,10 @@ enum PendingChangeContext {
 
     var message: String {
         switch self {
-        case .goalChange:
+        case .goalChange(let dayName):
+            if let dayName {
+                return String(localized: "You are lowering your target. To preserve your momentum, this change will take effect next \(dayName).")
+            }
             return String(localized: "You are lowering your target. To preserve your momentum, this change will take effect tomorrow morning.")
         case .blockedAppsChange:
             return String(localized: "Your goals are not met yet. To preserve your commitment, blocked-app changes will take effect tomorrow morning.")
@@ -41,10 +46,12 @@ enum PendingChangeContext {
 
     var bulletPoints: [String] {
         switch self {
-        case .goalChange:
+        case .goalChange(let dayName):
+            let effectLabel = dayName.map { String(localized: "New target starts next \($0)") }
+                ?? String(localized: "New target starts tomorrow at midnight")
             return [
                 String(localized: "Today's target remains unchanged"),
-                String(localized: "New target starts tomorrow at midnight"),
+                effectLabel,
                 String(localized: "Your progress streak continues")
             ]
         case .blockedAppsChange:
@@ -53,6 +60,19 @@ enum PendingChangeContext {
                 String(localized: "New app selection starts tomorrow at midnight"),
                 String(localized: "Your goal guardrails stay consistent")
             ]
+        }
+    }
+
+    /// Button label for the primary (schedule) action.
+    var scheduleButtonLabel: String {
+        switch self {
+        case .goalChange(let dayName):
+            if let dayName {
+                return String(localized: "Schedule for Next \(dayName)")
+            }
+            return String(localized: "Schedule for Tomorrow")
+        case .blockedAppsChange:
+            return String(localized: "Schedule for Tomorrow")
         }
     }
 
@@ -133,7 +153,7 @@ struct PendingGoalChangeView: View {
     private var headerIcon: some View {
         Image(systemName: "calendar.badge.clock")
             .font(.system(size: 60))
-            .foregroundStyle(.blue)
+            .foregroundStyle(Color.statusInfo)
             .accessibilityIdentifier("pendingChangeIcon")
     }
     
@@ -153,14 +173,14 @@ struct PendingGoalChangeView: View {
                 ForEach(context.bulletPoints, id: \.self) { bullet in
                     HStack(spacing: 8) {
                         Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
+                            .foregroundStyle(Color.statusSuccess)
                         Text(bullet)
                             .font(.subheadline)
                     }
                 }
             }
             .padding()
-            .background(Color.blue.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+            .background(Color.statusInfo.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
         }
         .accessibilityIdentifier("pendingChangeMessage")
     }
@@ -171,7 +191,7 @@ struct PendingGoalChangeView: View {
                 onSchedule()
                 dismiss()
             } label: {
-                Text(String(localized: "Schedule for Tomorrow"))
+                Text(context.scheduleButtonLabel)
                     .font(.headline)
                     .frame(maxWidth: .infinity)
             }
@@ -196,7 +216,7 @@ struct PendingGoalChangeView: View {
 // MARK: - Preview
 
 #Preview {
-    PendingGoalChangeView(context: .goalChange) {
+    PendingGoalChangeView(context: .goalChange()) {
         print("Scheduled for tomorrow")
     } onEmergencyUnlock: {
         print("Emergency unlock confirmed")
