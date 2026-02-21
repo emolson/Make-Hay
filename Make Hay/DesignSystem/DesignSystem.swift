@@ -13,11 +13,11 @@ enum DesignSystem {}
 // MARK: - Colors
 
 extension Color {
-    /// Goal ring colors
+    /// Goal progress colors
     static var goalSteps: Color { Color(.goalSteps) }
     static var goalActiveEnergy: Color { Color(.goalActiveEnergy) }
     static var goalExercise: Color { Color(.goalExercise) }
-    static var goalRingTrack: Color { Color(.goalRingTrack) }
+    static var goalBarTrack: Color { Color(.goalRingTrack) }
     static var goalTimeUnlock: Color { .orange }
 
     /// Status colors
@@ -30,8 +30,6 @@ extension Color {
 extension Font {
     /// Dashboard font tokens
     static var dashboardIcon: Font { .system(size: 32, weight: .regular, design: .default) }
-    static var dashboardPrimaryValue: Font { .system(size: 36, weight: .bold, design: .rounded) }
-    static var dashboardGoalMetIcon: Font { .system(size: 48, weight: .regular, design: .default) }
     static var dashboardErrorIcon: Font { .system(size: 50, weight: .regular, design: .default) }
 }
 

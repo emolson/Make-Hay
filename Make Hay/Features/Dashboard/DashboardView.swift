@@ -123,254 +123,109 @@ struct DashboardView: View {
     }
     
     private var goalsView: some View {
-        VStack(spacing: 24) {
-            Spacer()
-            
-            // Pending goal change banner
-            if viewModel.healthGoal.pendingGoal != nil {
-                pendingChangeBanner
-            }
-            
-            goalRings
-            
-            goalStatusText
-            
-            if viewModel.isBlocking {
-                blockingStatusBadge
-            }
-            
-            Spacer()
-            
-            refreshButton
-        }
-        .padding()
-        .accessibilityIdentifier("Dashboard.goalsView")
-    }
-    
-    private let ringBaseSize: CGFloat = 240
-    private let ringSpacing: CGFloat = 28
-    private let ringLineWidth: CGFloat = 18
-    
-    /// Concentric rings showing progress for each enabled goal.
-    private var goalRings: some View {
-        ZStack {
-            ForEach(Array(viewModel.goalProgresses.enumerated()), id: \.element.id) { index, goal in
-                let size = ringBaseSize - (CGFloat(index) * ringSpacing)
-                GoalRingView(
-                    progress: goal.progress,
-                    ringColor: ringColor(for: goal.type),
-                    size: size,
-                    lineWidth: ringLineWidth,
-                    accessibilityId: "goalRing.\(goal.type.rawValue)"
-                )
-            }
-            
-            VStack(spacing: 8) {
+        ScrollView {
+            VStack(spacing: 16) {
+                // Pending goal change banner
+                if viewModel.healthGoal.pendingGoal != nil {
+                    pendingChangeBanner
+                }
+                
+                // Inline celebration banner when all goals are met
                 if viewModel.isGoalMet {
-                    goalMetBadge
-                } else if let primaryGoal = viewModel.primaryGoalProgress {
-                    primaryGoalDisplay(for: primaryGoal)
-                } else {
+                    goalMetBanner
+                }
+                
+                if viewModel.goalProgresses.isEmpty {
                     emptyGoalsDisplay
+                } else {
+                    goalProgressRows
+                }
+                
+                if viewModel.isBlocking {
+                    blockingStatusBadge
                 }
             }
+            .padding()
         }
-        .frame(width: ringBaseSize, height: ringBaseSize)
-        .accessibilityIdentifier("goalRings")
-    }
-    
-    private func ringColor(for type: GoalType) -> Color {
-        type.color
-    }
-    
-    private func primaryGoalDisplay(for progress: GoalProgress) -> some View {
-        VStack(spacing: 4) {
-            Image(systemName: progress.type.iconName)
-                .font(.dashboardIcon)
-                .foregroundStyle(ringColor(for: progress.type))
-                .accessibilityIdentifier("dashboardIcon")
-            
-            Text(formattedCurrentValue(for: progress, includeUnit: false))
-                .font(.dashboardPrimaryValue)
-                .contentTransition(.numericText())
-                .accessibilityIdentifier("primaryGoalValue")
-            
-            Text(progress.type.displayName)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+        .refreshable {
+            await viewModel.loadGoals()
         }
+        .accessibilityIdentifier("Dashboard.goalsList")
     }
     
+    /// Empty state prompting the user to add their first goal.
+    /// **Why keep the centered layout?** Maintains the existing friendly
+    /// onboarding feel without requiring the bar-based aesthetic.
     private var emptyGoalsDisplay: some View {
-        Button {
-            viewModel.isShowingAddGoal = true
-        } label: {
-            VStack(spacing: 8) {
-                Image(systemName: "plus.circle.fill")
-                    .font(.dashboardIcon)
-                    .foregroundStyle(.tint)
-                    .accessibilityIdentifier("emptyGoalsIcon")
-                
-                Text(String(localized: "Add Goal"))
+        VStack(spacing: 12) {
+            Spacer()
+                .frame(height: 60)
+            
+            Image(systemName: "plus.circle.fill")
+                .font(.dashboardIcon)
+                .foregroundStyle(.tint)
+                .accessibilityIdentifier("emptyGoalsIcon")
+            
+            Text(String(localized: "Add your first goal to start"))
+                .font(.title3)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("progressText")
+            
+            Button {
+                viewModel.isShowingAddGoal = true
+            } label: {
+                Text(String(localized: "Get Started"))
                     .font(.headline)
-                    .foregroundStyle(.tint)
+                    .frame(minWidth: 200)
             }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .accessibilityIdentifier("getStartedButton")
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("addFirstGoalButton")
+        .padding(.vertical)
     }
     
-    private func goalSummaryRow(_ progress: GoalProgress) -> some View {
-        Button {
-            editingGoal = progress
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: progress.exerciseType?.iconName ?? progress.type.iconName)
-                    .font(.subheadline)
-                    .foregroundStyle(ringColor(for: progress.type))
-                    .frame(width: 20, height: 20, alignment: .center)
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(progress.type.displayName)
-                        .font(.subheadline)
-                        .foregroundStyle(.primary)
-                    
-                    // Show exercise type for exercise goals
-                    if let exerciseType = progress.exerciseType, exerciseType != .any {
-                        Text(exerciseType.displayName)
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
+    /// Vertically stacked linear progress bars, one per enabled goal.
+    /// **Why ForEach + GoalProgressRowView?** Each row is self-contained with
+    /// its own Gauge, formatting, and accessibility — scales to any goal count.
+    private var goalProgressRows: some View {
+        VStack(spacing: 4) {
+            ForEach(viewModel.goalProgresses) { goal in
+                GoalProgressRowView(progress: goal) {
+                    editingGoal = goal
                 }
+            }
+            
+            // Blocking strategy picker
+            blockingStrategyPicker
+        }
+    }
+    
+    /// Inline celebration banner shown when all goals are met.
+    /// **Why inline instead of overlay?** Keeps the progress bars visible at 100%
+    /// so the user can see exactly what they achieved, while clearly communicating
+    /// that apps are unlocked.
+    private var goalMetBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.title2)
+                .foregroundStyle(.green)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(String(localized: "Goals Met!"))
+                    .font(.headline)
+                    .foregroundStyle(.green)
                 
-                Spacer()
-                
-                Text("\(formattedCurrentValue(for: progress, includeUnit: true)) / \(formattedTargetValue(for: progress))")
+                Text(String(localized: "Apps Unlocked"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                
-                // Chevron to indicate tappable row
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
             }
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("goalSummaryRow.\(progress.id)")
-        .accessibilityHint(String(localized: "Tap to edit goal"))
-    }
-    
-    private func formattedCurrentValue(for progress: GoalProgress, includeUnit: Bool) -> String {
-        switch progress.type {
-        case .steps:
-            let value = Int(progress.current)
-            let formatted = value.formatted(.number)
-            return includeUnit ? localizedStepsValue(formatted) : formatted
-        case .activeEnergy:
-            return localizedKilocaloriesValue(Int(progress.current))
-        case .exercise:
-            return localizedMinutesValue(Int(progress.current))
-        case .timeUnlock:
-            return formattedTimeValue(minutesSinceMidnight: Int(progress.current))
-        }
-    }
-    
-    private func formattedTargetValue(for progress: GoalProgress) -> String {
-        switch progress.type {
-        case .steps:
-            return localizedStepsValue(Int(progress.target).formatted(.number))
-        case .activeEnergy:
-            return localizedKilocaloriesValue(Int(progress.target))
-        case .exercise:
-            return localizedMinutesValue(Int(progress.target))
-        case .timeUnlock:
-            return formattedTimeValue(minutesSinceMidnight: Int(progress.target))
-        }
-    }
-
-    private func localizedStepsValue(_ formattedValue: String) -> String {
-        String(
-            localized: "dashboard.units.steps",
-            defaultValue: "\(formattedValue) steps",
-            comment: "Steps value with unit"
-        )
-    }
-
-    private func localizedKilocaloriesValue(_ value: Int) -> String {
-        let formatted = value.formatted(.number)
-        return String(
-            localized: "dashboard.units.kilocalories",
-            defaultValue: "\(formatted) kcal",
-            comment: "Active energy value in kilocalories"
-        )
-    }
-
-    private func localizedMinutesValue(_ value: Int) -> String {
-        let formatted = value.formatted(.number)
-        return String(
-            localized: "dashboard.units.minutes",
-            defaultValue: "\(formatted) min",
-            comment: "Exercise minutes value with unit"
-        )
-    }
-
-    private func formattedTimeValue(minutesSinceMidnight: Int) -> String {
-        let clamped = min(max(minutesSinceMidnight, 0), (24 * 60) - 1)
-        let hour = clamped / 60
-        let minute = clamped % 60
-        let date = Calendar.current.date(bySettingHour: hour, minute: minute, second: 0, of: Date()) ?? Date()
-        return date.formatted(date: .omitted, time: .shortened)
-    }
-    
-    /// Celebratory badge shown when the user meets their goal.
-    private var goalMetBadge: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.dashboardGoalMetIcon)
-                .foregroundStyle(Color.goalExercise)
-                .accessibilityIdentifier("goalMetBadge")
             
-            Text(String(localized: "Goals Met!"))
-                .font(.headline)
-                .foregroundStyle(Color.goalExercise)
-            
-            Text(String(localized: "Apps Unlocked"))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            Spacer()
         }
-    }
-    
-    /// Text showing progress as "X / Y steps" below the ring.
-    private var goalStatusText: some View {
-        VStack(spacing: 4) {
-            if viewModel.goalProgresses.isEmpty {
-                VStack(spacing: 12) {
-                    Text(String(localized: "Add your first goal to start"))
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("progressText")
-                    
-                    Button {
-                        viewModel.isShowingAddGoal = true
-                    } label: {
-                        Text(String(localized: "Get Started"))
-                            .font(.headline)
-                            .frame(minWidth: 200)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .accessibilityIdentifier("getStartedButton")
-                }
-                .padding(.vertical)
-            } else {
-                ForEach(viewModel.goalProgresses) { progress in
-                    goalSummaryRow(progress)
-                }
-                
-                // Blocking strategy picker
-                blockingStrategyPicker
-            }
-        }
+        .padding()
+        .background(Color.green.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityIdentifier("goalMetBanner")
     }
     
     /// Picker for selecting the blocking strategy (any vs all goals).
@@ -392,6 +247,44 @@ struct DashboardView: View {
         .pickerStyle(.segmented)
         .padding(.top, 8)
         .accessibilityIdentifier("blockingStrategyPicker")
+    }
+    
+    /// Banner shown when a goal change is scheduled for tomorrow.
+    /// **Why show this?** Provides transparency about pending changes and allows cancellation.
+    private var pendingChangeBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "calendar.badge.clock")
+                .font(.title3)
+                .foregroundStyle(.blue)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(String(localized: "Goal Update Scheduled"))
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                
+                if let effectiveDate = viewModel.healthGoal.pendingGoalEffectiveDate {
+                    Text("Takes effect at \(effectiveDate, style: .time)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            
+            Spacer()
+            
+            Button {
+                viewModel.cancelPendingGoal()
+            } label: {
+                Text(String(localized: "Cancel"))
+                    .font(.caption)
+                    .fontWeight(.medium)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .accessibilityIdentifier("cancelPendingButton")
+        }
+        .padding()
+        .background(Color.blue.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityIdentifier("pendingChangeBanner")
     }
     
     /// Creates an edit sheet for the specified goal progress.
@@ -432,60 +325,6 @@ struct DashboardView: View {
         .padding(.vertical, 8)
         .background(Color.statusBlocked.gradient, in: Capsule())
         .accessibilityIdentifier("blockingStatusBadge")
-    }
-    
-    private var refreshButton: some View {
-        Button {
-            Task {
-                await viewModel.loadGoals()
-            }
-        } label: {
-            Label(
-                String(localized: "Refresh"),
-                systemImage: "arrow.clockwise"
-            )
-            .font(.headline)
-        }
-        .buttonStyle(.bordered)
-        .accessibilityIdentifier("refreshButton")
-    }
-    
-    /// Banner shown when a goal change is scheduled for tomorrow.
-    /// **Why show this?** Provides transparency about pending changes and allows cancellation.
-    private var pendingChangeBanner: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "calendar.badge.clock")
-                .font(.title3)
-                .foregroundStyle(.blue)
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(String(localized: "Goal Update Scheduled"))
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                
-                if let effectiveDate = viewModel.healthGoal.pendingGoalEffectiveDate {
-                    Text("Takes effect at \(effectiveDate, style: .time)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            
-            Spacer()
-            
-            Button {
-                viewModel.cancelPendingGoal()
-            } label: {
-                Text(String(localized: "Cancel"))
-                    .font(.caption)
-                    .fontWeight(.medium)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .accessibilityIdentifier("cancelPendingButton")
-        }
-        .padding()
-        .background(Color.blue.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
-        .accessibilityIdentifier("pendingChangeBanner")
     }
     
     private var errorView: some View {
