@@ -20,8 +20,8 @@ struct AppPickerView: View {
 
     // MARK: - ViewModel
 
-    /// Owned by this view via `@StateObject` so the edit session survives SwiftUI re-renders.
-    @StateObject private var viewModel: AppPickerViewModel
+    /// Owned by this view via `@State` so the edit session survives SwiftUI re-renders.
+    @State private var viewModel: AppPickerViewModel
 
     // MARK: - Initialization
 
@@ -31,7 +31,7 @@ struct AppPickerView: View {
         healthService: any HealthServiceProtocol,
         goalStatusProvider: any GoalStatusProvider
     ) {
-        _viewModel = StateObject(
+        _viewModel = State(
             wrappedValue: AppPickerViewModel(
                 blockerService: blockerService,
                 healthService: healthService,

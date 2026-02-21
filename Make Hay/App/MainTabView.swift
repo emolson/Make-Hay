@@ -10,7 +10,7 @@ import SwiftUI
 /// The main tab-based navigation view for the app.
 /// Contains Dashboard and Settings tabs.
 struct MainTabView: View {
-    @EnvironmentObject private var container: AppDependencyContainer
+    @Environment(AppDependencyContainer.self) private var container
     
     var body: some View {
         TabView {
@@ -43,5 +43,5 @@ struct MainTabView: View {
 
 #Preview {
     MainTabView()
-        .environmentObject(AppDependencyContainer.preview())
+        .environment(AppDependencyContainer.preview())
 }

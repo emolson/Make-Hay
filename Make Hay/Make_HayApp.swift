@@ -10,7 +10,7 @@ import SwiftUI
 @main
 struct Make_HayApp: App {
     /// Dependency container holding all app services.
-    @StateObject private var container = AppDependencyContainer()
+    @State private var container = AppDependencyContainer()
     
     /// Persisted flag indicating whether onboarding has been completed.
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
@@ -19,14 +19,14 @@ struct Make_HayApp: App {
         WindowGroup {
             if hasCompletedOnboarding {
                 MainTabView()
-                    .environmentObject(container)
+                    .environment(container)
             } else {
                 OnboardingView(
                     hasCompletedOnboarding: $hasCompletedOnboarding,
                     healthService: container.healthService,
                     blockerService: container.blockerService
                 )
-                .environmentObject(container)
+                .environment(container)
             }
         }
     }

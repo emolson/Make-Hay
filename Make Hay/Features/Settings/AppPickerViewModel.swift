@@ -8,7 +8,6 @@
 import FamilyControls
 import HealthKit
 import UIKit
-import Combine
 
 /// ViewModel managing the full lifecycle of the blocked-app picker session.
 ///
@@ -22,31 +21,32 @@ import Combine
 /// open) and only writing to the service on picker *dismissal*, we prevent transient
 /// empty-state mutations from overwriting a valid saved selection.
 @MainActor
-final class AppPickerViewModel: ObservableObject {
+@Observable
+final class AppPickerViewModel {
 
-    // MARK: - Published State
+    // MARK: - State
 
     /// Live binding given to `FamilyActivityPicker`.
     /// Seeded from `persistedSelection` when the picker opens.
-    @Published var draftSelection: FamilyActivitySelection = FamilyActivitySelection()
+    var draftSelection: FamilyActivitySelection = FamilyActivitySelection()
 
     /// The last successfully committed selection — drives the summary UI.
-    @Published private(set) var persistedSelection: FamilyActivitySelection = FamilyActivitySelection()
+    private(set) var persistedSelection: FamilyActivitySelection = FamilyActivitySelection()
 
     /// Controls picker sheet presentation.
-    @Published var isPickerPresented: Bool = false
+    var isPickerPresented: Bool = false
 
     /// `true` while a save/shield update is in-flight.
-    @Published private(set) var isSaving: Bool = false
+    private(set) var isSaving: Bool = false
 
     /// Whether an error alert should be shown.
-    @Published var showError: Bool = false
+    var showError: Bool = false
 
     /// Error description forwarded to the alert message.
-    @Published private(set) var errorMessage: String = ""
+    private(set) var errorMessage: String = ""
 
     /// Whether the next-day confirmation guard sheet should be shown.
-    @Published var showingPendingConfirmation: Bool = false
+    var showingPendingConfirmation: Bool = false
 
     // MARK: - Computed Properties
 

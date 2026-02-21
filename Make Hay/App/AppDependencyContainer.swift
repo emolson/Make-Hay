@@ -6,13 +6,13 @@
 //
 
 import Foundation
-import Combine
 import HealthKit
 
 /// Dependency Injection container that instantiates and holds references to all services.
 /// Injects protocols, not concrete types, to enable testability and preview support.
 @MainActor
-final class AppDependencyContainer: ObservableObject {
+@Observable
+final class AppDependencyContainer {
     /// The health service for HealthKit operations.
     let healthService: any HealthServiceProtocol
     
@@ -28,6 +28,7 @@ final class AppDependencyContainer: ObservableObject {
     let backgroundHealthMonitor: any BackgroundHealthMonitorProtocol
 
     /// Shared dashboard view model used across tabs for consistent gate state.
+    @ObservationIgnored
     lazy var dashboardViewModel: DashboardViewModel = DashboardViewModel(
         healthService: healthService,
         blockerService: blockerService
