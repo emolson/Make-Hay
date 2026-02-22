@@ -13,7 +13,7 @@ import SwiftUI
 /// **Why a separate struct?** Keeps the view layer decoupled from the full `HealthGoal`
 /// model. Only the data needed for display is exposed, and the `weekday` index is
 /// preserved for navigation.
-struct DaySummary: Identifiable, Sendable {
+struct DaySummary: Identifiable, Sendable, Hashable {
     let weekday: Int             // Calendar.weekday: 1–7
     let name: String             // e.g. "Monday"
     let shortName: String        // e.g. "Mon"
