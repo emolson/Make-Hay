@@ -158,16 +158,6 @@ struct DashboardView: View {
                         
                         goalProgressRows
                     }
-                    
-                    // Unlock Strategy Section
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(String(localized: "UNLOCK WHEN"))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 16)
-                        
-                        blockingStrategyCard
-                    }
                 }
                 
                 if viewModel.isBlocking {
@@ -256,32 +246,6 @@ struct DashboardView: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("inlineAddGoalButton")
             }
-        }
-        .background(Color.surfaceCard)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal, 16)
-    }
-    
-    /// Card containing the picker for selecting the blocking strategy (any vs all goals).
-    /// **Why a separate card?** Separates the "What are my goals?" from "How do they affect my phone?"
-    /// making the UI hierarchy clearer.
-    private var blockingStrategyCard: some View {
-        VStack(spacing: 0) {
-            Picker(String(localized: "Unlock when"), selection: Binding(
-                get: { viewModel.healthGoal.blockingStrategy },
-                set: { newValue in
-                    Task {
-                        await viewModel.updateBlockingStrategy(newValue)
-                    }
-                }
-            )) {
-                ForEach(BlockingStrategy.allCases) { strategy in
-                    Text(strategy.displayName).tag(strategy)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding(16)
-            .accessibilityIdentifier("blockingStrategyPicker")
         }
         .background(Color.surfaceCard)
         .clipShape(RoundedRectangle(cornerRadius: 12))

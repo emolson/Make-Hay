@@ -99,14 +99,6 @@ enum GoalChangeIntent: Sendable {
             hasHarder = true
         }
         
-        // Check blocking strategy
-        // Changing from .all to .any is easier (fewer requirements to unlock)
-        if original.blockingStrategy == .all && proposed.blockingStrategy == .any {
-            hasEasier = true
-        } else if original.blockingStrategy == .any && proposed.blockingStrategy == .all {
-            hasHarder = true
-        }
-        
         // Priority: If any change makes it easier, classify as easier
         // This prevents users from sneaking an easier change alongside a harder one
         if hasEasier {

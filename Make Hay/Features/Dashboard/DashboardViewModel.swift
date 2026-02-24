@@ -22,7 +22,6 @@ protocol ScheduleGoalManaging: AnyObject {
     var weeklySchedule: WeeklyGoalSchedule { get }
     var todayWeekday: Int { get }
 
-    func updateBlockingStrategy(_ strategy: BlockingStrategy, forWeekday weekday: Int) async
     func schedulePendingGoal(_ newGoal: HealthGoal, forWeekday weekday: Int?)
     func applyEmergencyChange(_ newGoal: HealthGoal) async
     func shouldDeferGoalEdits() async -> Bool
@@ -450,15 +449,6 @@ final class DashboardViewModel: GoalStatusProvider, ScheduleGoalManaging {
         await checkGoalStatus()
     }
     
-    /// Updates the blocking strategy.
-    /// **Why async?** After changing the strategy, we need to recalculate whether
-    /// apps should be blocked based on the new logic (any vs all).
-    func updateBlockingStrategy(_ strategy: BlockingStrategy) async {
-        healthGoal.blockingStrategy = strategy
-        saveSchedule()
-        await checkGoalStatus()
-    }
-    
     /// Schedules a goal change to take effect at the next occurrence of the target weekday.
     ///
     /// **Why weekday-aware?** The weekly schedule allows editing future days directly.
@@ -471,7 +461,9 @@ final class DashboardViewModel: GoalStatusProvider, ScheduleGoalManaging {
     func schedulePendingGoal(_ newGoal: HealthGoal, forWeekday weekday: Int? = nil) {
         let targetWeekday = weekday ?? todayWeekday
         var dayGoal = weeklySchedule.goal(for: targetWeekday)
-        dayGoal.pendingGoal = PendingHealthGoal(from: newGoal)
+        var normalizedGoal = newGoal
+        normalizedGoal.blockingStrategy = .all
+        dayGoal.pendingGoal = PendingHealthGoal(from: normalizedGoal)
         if targetWeekday == todayWeekday {
             // Editing today while blocked → defer to next occurrence (7 days)
             dayGoal.pendingGoalEffectiveDate = Date.nextOccurrence(of: targetWeekday)
@@ -487,12 +479,15 @@ final class DashboardViewModel: GoalStatusProvider, ScheduleGoalManaging {
     /// **Why async?** Must update blocking status immediately after applying the change.
     /// - Parameter newGoal: The proposed goal configuration to apply now
     func applyEmergencyChange(_ newGoal: HealthGoal) async {
+        var normalizedGoal = newGoal
+        normalizedGoal.blockingStrategy = .all
+
         // Apply the changes immediately
-        healthGoal.stepGoal = newGoal.stepGoal
-        healthGoal.activeEnergyGoal = newGoal.activeEnergyGoal
-        healthGoal.exerciseGoals = newGoal.exerciseGoals
-        healthGoal.timeBlockGoal = newGoal.timeBlockGoal
-        healthGoal.blockingStrategy = newGoal.blockingStrategy
+        healthGoal.stepGoal = normalizedGoal.stepGoal
+        healthGoal.activeEnergyGoal = normalizedGoal.activeEnergyGoal
+        healthGoal.exerciseGoals = normalizedGoal.exerciseGoals
+        healthGoal.timeBlockGoal = normalizedGoal.timeBlockGoal
+        healthGoal.blockingStrategy = .all
         
         // Clear any pending changes since we're applying now
         healthGoal.pendingGoal = nil
@@ -613,18 +608,6 @@ final class DashboardViewModel: GoalStatusProvider, ScheduleGoalManaging {
         }
     }
 
-    /// Updates the blocking strategy for a specific weekday.
-    func updateBlockingStrategy(_ strategy: BlockingStrategy, forWeekday weekday: Int) async {
-        var dayGoal = weeklySchedule.goal(for: weekday)
-        dayGoal.blockingStrategy = strategy
-        weeklySchedule.setGoal(dayGoal, for: weekday)
-        saveSchedule()
-
-        if weekday == todayWeekday {
-            await checkGoalStatus()
-        }
-    }
-    
     // MARK: - Private Methods
 
     /// Persists the weekly schedule to App Group UserDefaults.
@@ -633,6 +616,15 @@ final class DashboardViewModel: GoalStatusProvider, ScheduleGoalManaging {
     /// The schedule's save method also keeps the legacy `healthGoalData` key in sync
     /// for the DeviceActivityMonitor extension.
     private func saveSchedule() {
+        for weekday in 1...7 {
+            var dayGoal = weeklySchedule.goal(for: weekday)
+            dayGoal.blockingStrategy = .all
+            if var pending = dayGoal.pendingGoal {
+                pending.blockingStrategy = .all
+                dayGoal.pendingGoal = pending
+            }
+            weeklySchedule.setGoal(dayGoal, for: weekday)
+        }
         WeeklyGoalSchedule.save(weeklySchedule)
     }
     
@@ -697,9 +689,21 @@ final class DashboardViewModel: GoalStatusProvider, ScheduleGoalManaging {
         var didApplyAny = false
         for weekday in 1...7 {
             var dayGoal = weeklySchedule.goal(for: weekday)
+            if dayGoal.blockingStrategy != .all {
+                dayGoal.blockingStrategy = .all
+                didApplyAny = true
+            }
+            if var pending = dayGoal.pendingGoal, pending.blockingStrategy != .all {
+                pending.blockingStrategy = .all
+                dayGoal.pendingGoal = pending
+                didApplyAny = true
+            }
             if dayGoal.applyPendingIfReady() {
+                dayGoal.blockingStrategy = .all
                 weeklySchedule.setGoal(dayGoal, for: weekday)
                 didApplyAny = true
+            } else {
+                weeklySchedule.setGoal(dayGoal, for: weekday)
             }
         }
         if didApplyAny {

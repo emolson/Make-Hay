@@ -19,7 +19,7 @@ struct HealthGoal: Codable, Sendable, Equatable {
     /// The user's time-based unlock goal configuration.
     var timeBlockGoal: TimeBlockGoal = .init()
     /// Strategy for determining when goals unlock apps.
-    var blockingStrategy: BlockingStrategy = .any
+    var blockingStrategy: BlockingStrategy = .all
     
     // MARK: - Pending Changes
     
@@ -103,13 +103,7 @@ enum GoalBlockingEvaluator {
     static func isGoalMet(goal: HealthGoal, snapshot: GoalEvaluationSnapshot) -> Bool {
         let progresses = goalProgresses(goal: goal, snapshot: snapshot)
         guard !progresses.isEmpty else { return true }
-
-        switch goal.blockingStrategy {
-        case .any:
-            return progresses.contains { $0 }
-        case .all:
-            return progresses.allSatisfy { $0 }
-        }
+        return progresses.allSatisfy { $0 }
     }
 
     /// Returns whether apps should currently be blocked.
@@ -121,11 +115,9 @@ enum GoalBlockingEvaluator {
 
     /// Returns whether easier edits should be deferred behind the pending-change flow.
     ///
-    /// **Why separate from `shouldBlock`?** Blocking respects the user's strategy
-    /// (`.any` / `.all`), but gate decisions must be stricter: if *any* enabled goal
-    /// is still unmet, the user hasn't fully earned their unlock and shouldn't be
-    /// allowed to weaken commitments. This prevents the `.any` strategy from
-    /// letting a met time-goal silently bypass the gate on an unmet step goal.
+    /// **Why separate from `shouldBlock`?** Deferral gate logic is intentionally
+    /// decoupled from blocking logic so each can evolve independently. All enabled
+    /// goals must be met before the user is permitted to weaken their commitments.
     static func shouldDeferChanges(goal: HealthGoal, snapshot: GoalEvaluationSnapshot) -> Bool {
         let progresses = goalProgresses(goal: goal, snapshot: snapshot)
         guard !progresses.isEmpty else { return false }
@@ -243,20 +235,12 @@ struct TimeBlockGoal: Codable, Sendable, Equatable {
 }
 
 /// Defines when apps unlock relative to enabled goals.
-enum BlockingStrategy: String, Codable, CaseIterable, Sendable, Identifiable {
+///
+/// **Why keep `.any`?** Retained for `Codable` backwards-compatibility with
+/// persisted data. All runtime paths enforce `.all`; `.any` is never written.
+enum BlockingStrategy: String, Codable, Sendable {
     case any
     case all
-    
-    var id: String { rawValue }
-    
-    var displayName: String {
-        switch self {
-        case .any:
-            return String(localized: "Any Goal Reached")
-        case .all:
-            return String(localized: "All Goals Reached")
-        }
-    }
 }
 
 /// Supported exercise types for filtering workouts.

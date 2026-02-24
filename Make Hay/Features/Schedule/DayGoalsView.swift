@@ -146,28 +146,6 @@ struct DayGoalsView: View {
                     Text(String(localized: "GOALS"))
                 }
 
-                // Blocking strategy
-                Section {
-                    Picker(String(localized: "Unlock when"), selection: Binding(
-                        get: { dayGoal.blockingStrategy },
-                        set: { newValue in
-                            Task {
-                                await viewModel.updateBlockingStrategy(
-                                    newValue,
-                                    forWeekday: weekday
-                                )
-                            }
-                        }
-                    )) {
-                        ForEach(BlockingStrategy.allCases) { strategy in
-                            Text(strategy.displayName).tag(strategy)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .accessibilityIdentifier("dayBlockingStrategyPicker")
-                } header: {
-                    Text(String(localized: "UNLOCK WHEN"))
-                }
             }
 
             // Pending change indicator
