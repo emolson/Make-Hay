@@ -632,7 +632,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = MakeHayDeviceActivityMonitorSources/MakeHayDeviceActivityMonitor.entitlements;
+				CODE_SIGN_ENTITLEMENTS = MakeHayDeviceActivityMonitorExtension/MakeHayDeviceActivityMonitor.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 6VQ42S7UGS;
@@ -656,7 +656,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = MakeHayDeviceActivityMonitorSources/MakeHayDeviceActivityMonitor.entitlements;
+				CODE_SIGN_ENTITLEMENTS = MakeHayDeviceActivityMonitorExtension/MakeHayDeviceActivityMonitor.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 6VQ42S7UGS;

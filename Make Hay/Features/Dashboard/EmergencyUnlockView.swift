@@ -28,6 +28,9 @@ struct EmergencyUnlockView: View {
     
     /// Whether the entered code matches the verification code.
     @State private var isCodeValid: Bool = false
+
+    /// Focus state for the verification text field.
+    @FocusState private var isCodeFieldFocused: Bool
     
     /// Callback invoked when the user successfully confirms the emergency unlock.
     let onConfirm: () -> Void
@@ -51,20 +54,31 @@ struct EmergencyUnlockView: View {
     
     var body: some View {
         NavigationStack {
-            VStack(spacing: 32) {
-                Spacer()
-                
-                warningIcon
-                
-                warningText
-                
-                verificationSection
-                
-                Spacer()
-                
-                confirmButton
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 24) {
+                        warningIcon
+                            .padding(.top, 24)
+                        
+                        warningText
+                        
+                        verificationSection
+                            .id("codeEntry")
+                        
+                        // Extra space so scroll-to can lift the field above the keyboard
+                        Spacer()
+                            .frame(height: 120)
+                    }
+                    .padding(.horizontal)
+                }
+                .scrollDismissesKeyboard(.interactively)
+                .onChange(of: isCodeFieldFocused) { _, focused in
+                    guard focused else { return }
+                    withAnimation {
+                        proxy.scrollTo("codeEntry", anchor: .center)
+                    }
+                }
             }
-            .padding()
             .navigationTitle(String(localized: "Emergency Unlock"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -74,7 +88,22 @@ struct EmergencyUnlockView: View {
                     }
                     .accessibilityIdentifier("cancelEmergencyButton")
                 }
+
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button(String(localized: "Done")) {
+                        isCodeFieldFocused = false
+                    }
+                    .accessibilityIdentifier("dismissKeyboardButton")
+                }
             }
+        }
+        .safeAreaInset(edge: .bottom) {
+            confirmButton
+                .padding(.horizontal)
+                .padding(.top, 16)
+                .padding(.bottom, 8)
+                .background(.ultraThinMaterial)
         }
         .onChange(of: enteredCode) { _, newValue in
             isCodeValid = newValue == verificationCode
@@ -86,7 +115,7 @@ struct EmergencyUnlockView: View {
     private var warningIcon: some View {
         Image(systemName: "exclamationmark.triangle.fill")
             .font(.system(size: 60))
-            .foregroundStyle(.orange)
+            .foregroundStyle(.statusWarning)
             .accessibilityIdentifier("emergencyWarningIcon")
     }
     
@@ -120,8 +149,10 @@ struct EmergencyUnlockView: View {
                 .font(.system(size: 32, weight: .medium, design: .rounded))
                 .multilineTextAlignment(.center)
                 .keyboardType(.numberPad)
+                .submitLabel(.done)
                 .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: 200)
+                .focused($isCodeFieldFocused)
                 .accessibilityIdentifier("codeEntryField")
                 .onChange(of: enteredCode) { _, newValue in
                     // Limit to 4 digits
@@ -134,6 +165,7 @@ struct EmergencyUnlockView: View {
     
     private var confirmButton: some View {
         Button {
+            isCodeFieldFocused = false
             onConfirm()
             dismiss()
         } label: {
@@ -142,7 +174,7 @@ struct EmergencyUnlockView: View {
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(.borderedProminent)
-        .tint(.orange)
+        .tint(.statusWarning)
         .controlSize(.large)
         .disabled(!isCodeValid)
         .accessibilityIdentifier("confirmEmergencyButton")
