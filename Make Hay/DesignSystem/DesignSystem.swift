@@ -29,6 +29,7 @@ extension Color {
     static var statusInfo: Color { .blue }
     static var statusError: Color { .red }
     static var statusPermissionPending: Color { .purple }
+    static var statusPermissionMissing: Color { .orange }
 
     /// Surface / background colors for grouped card layouts.
     static var surfaceGrouped: Color { Color(uiColor: .systemGroupedBackground) }

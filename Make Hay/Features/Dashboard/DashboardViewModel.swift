@@ -162,6 +162,24 @@ final class DashboardViewModel: GoalStatusProvider, ScheduleGoalManaging {
     
     /// Controls presentation of the Add Goal sheet.
     var isShowingAddGoal: Bool = false
+
+    /// Current HealthKit authorization status, refreshed on every foreground resume.
+    /// **Why track here?** If the user revokes Health access in Settings while the app
+    /// is backgrounded, the Dashboard needs to surface a prominent banner immediately
+    /// on return — not silently fail to load data.
+    var healthPermissionStatus: HealthAuthorizationStatus = .authorized
+
+    /// Current Screen Time (FamilyControls) authorization status.
+    /// **Why track here?** Same rationale as `healthPermissionStatus`. Revoked Screen
+    /// Time access silently disables blocking, which defeats the app's core purpose.
+    var screenTimePermissionGranted: Bool = true
+
+    /// Whether any required permission is missing.
+    /// **Why computed?** Single source of truth derived from the two statuses above,
+    /// consumed by the view to decide whether to show the permissions banner.
+    var isPermissionMissing: Bool {
+        healthPermissionStatus != .authorized || !screenTimePermissionGranted
+    }
     
     /// The last day number the app checked for steps.
     /// Used to detect when a new day has started and reset blocking accordingly.
@@ -304,6 +322,15 @@ final class DashboardViewModel: GoalStatusProvider, ScheduleGoalManaging {
         self.healthService = healthService
         self.blockerService = blockerService
         self.timeUnlockScheduler = timeUnlockScheduler ?? DeviceActivityTimeUnlockScheduler()
+
+        // Seed permission state from SharedStorage so the UI renders correctly
+        // before the first async `refreshPermissionStatus()` completes.
+        // **Why not default to `.authorized`?** If the user revoked permissions
+        // while the app was terminated, the banner should appear on the very
+        // first frame rather than briefly showing "everything is fine".
+        self.healthPermissionStatus = SharedStorage.healthPermissionGranted ? .authorized : .notDetermined
+        self.screenTimePermissionGranted = SharedStorage.screenTimePermissionGranted
+
         refreshGoalFromStorage()
     }
     
@@ -314,9 +341,28 @@ final class DashboardViewModel: GoalStatusProvider, ScheduleGoalManaging {
     /// queries can succeed. Requesting authorization when already granted is a no-op.
     func onAppear() async {
         refreshGoalFromStorage()
+        await refreshPermissionStatus()
         _ = try? await blockerService.applyPendingSelectionIfReady()
         startTimeTickTimer()
         await requestAuthorizationAndLoad()
+    }
+
+    /// Queries both services for their current authorization state and updates
+    /// the published permission properties.
+    ///
+    /// **Why a dedicated method?** Called on appear *and* on every foreground resume
+    /// so the banner reacts within one frame if the user toggled permissions in Settings.
+    func refreshPermissionStatus() async {
+        let latestHealth = await healthService.authorizationStatus
+        let latestScreenTime = await blockerService.isAuthorized
+
+        healthPermissionStatus = latestHealth
+        screenTimePermissionGranted = latestScreenTime
+
+        // Persist so the next cold-launch seeds the correct initial state
+        // before the first async refresh completes.
+        SharedStorage.healthPermissionGranted = (latestHealth == .authorized)
+        SharedStorage.screenTimePermissionGranted = latestScreenTime
     }
     
     /// Fetches the current day's health metrics from HealthKit.

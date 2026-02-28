@@ -98,6 +98,10 @@ struct DashboardView: View {
                         scenePhaseTask = Task {
                             try? await Task.sleep(for: .milliseconds(300))
                             guard !Task.isCancelled else { return }
+
+                            // Refresh permission status first — the user may have
+                            // just returned from Settings after re-granting access.
+                            await viewModel.refreshPermissionStatus()
                             
                             let previousGoalMet = viewModel.isGoalMet
                             await viewModel.loadGoals()
@@ -142,6 +146,12 @@ struct DashboardView: View {
     private var goalsView: some View {
         ScrollView {
             VStack(spacing: 24) {
+                // Permissions Banner — shown prominently above all other content
+                // when HealthKit or Screen Time access has been revoked.
+                if viewModel.isPermissionMissing {
+                    permissionsBanner
+                }
+
                 // Banners Section
                 VStack(spacing: 12) {
                     if viewModel.healthGoal.pendingGoal != nil {
@@ -364,6 +374,15 @@ struct DashboardView: View {
         .padding(.vertical, 8)
         .background(Color.statusBlocked.gradient, in: Capsule())
         .accessibilityIdentifier("blockingStatusBadge")
+    }
+
+    /// Prominent banner alerting the user that one or both required permissions
+    /// have been revoked. Delegates rendering to `PermissionsBannerView`.
+    private var permissionsBanner: some View {
+        PermissionsBannerView(
+            healthStatus: viewModel.healthPermissionStatus,
+            screenTimeAuthorized: viewModel.screenTimePermissionGranted
+        )
     }
     
     private var errorView: some View {

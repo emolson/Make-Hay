@@ -99,12 +99,15 @@ final class OnboardingViewModel {
         do {
             try await healthService.requestAuthorization()
             healthPermissionGranted = true
+            SharedStorage.healthPermissionGranted = true
         } catch let error as HealthServiceError {
             errorMessage = error.errorDescription
             healthPermissionGranted = false
+            SharedStorage.healthPermissionGranted = false
         } catch {
             errorMessage = error.localizedDescription
             healthPermissionGranted = false
+            SharedStorage.healthPermissionGranted = false
         }
         
         isRequestingPermission = false
@@ -119,12 +122,15 @@ final class OnboardingViewModel {
         do {
             try await blockerService.requestAuthorization()
             screenTimePermissionGranted = true
+            SharedStorage.screenTimePermissionGranted = true
         } catch let error as BlockerServiceError {
             errorMessage = error.errorDescription
             screenTimePermissionGranted = false
+            SharedStorage.screenTimePermissionGranted = false
         } catch {
             errorMessage = error.localizedDescription
             screenTimePermissionGranted = false
+            SharedStorage.screenTimePermissionGranted = false
         }
         
         isRequestingPermission = false
