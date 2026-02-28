@@ -39,10 +39,10 @@ enum SharedStorage {
     // MARK: - Permission Status
 
     /// Key used to persist whether HealthKit authorization was granted during onboarding.
-    private static let healthPermissionGrantedKey = "healthPermissionGranted"
+    private nonisolated static let healthPermissionGrantedKey = "healthPermissionGranted"
 
     /// Key used to persist whether Screen Time authorization was granted during onboarding.
-    private static let screenTimePermissionGrantedKey = "screenTimePermissionGranted"
+    private nonisolated static let screenTimePermissionGrantedKey = "screenTimePermissionGranted"
 
     /// Whether HealthKit permission was granted during onboarding.
     ///

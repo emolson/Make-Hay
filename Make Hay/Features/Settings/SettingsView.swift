@@ -13,12 +13,13 @@ struct SettingsView: View {
     
     // MARK: - Dependencies
     
-    /// The health service for checking authorization status.
-    /// **Why `@Environment`?** Removes init-param threading from parent views and makes
-    /// previews zero-config — mock defaults are provided by `EnvironmentKeys.swift`.
-    @Environment(\.healthService) private var healthService
+    /// Shared permission manager providing HealthKit and Screen Time authorization state.
+    /// **Why `@Environment`?** Centralises permission logic that was previously duplicated
+    /// between this view and `DashboardViewModel`. Mock-backed default keeps previews
+    /// zero-config.
+    @Environment(\.permissionManager) private var permissionManager
     
-    /// The blocker service for app selection.
+    /// The blocker service for app selection and debug shield toggling.
     @Environment(\.blockerService) private var blockerService
     
     // MARK: - State
@@ -42,12 +43,6 @@ struct SettingsView: View {
     @State private var shieldUpdateTask: Task<Void, Never>?
     #endif
     
-    /// Tracks the current health authorization status for display.
-    @State private var healthAuthStatus: HealthAuthorizationStatus = .notDetermined
-    
-    /// Tracks the current Screen Time authorization status for display.
-    @State private var screenTimeAuthorized: Bool = false
-    
     // MARK: - Body
     
     var body: some View {
@@ -61,10 +56,10 @@ struct SettingsView: View {
             }
             .navigationTitle(String(localized: "Settings"))
             .task {
-                await refreshPermissionStatus()
+                await permissionManager.refresh()
             }
             .refreshable {
-                await refreshPermissionStatus()
+                await permissionManager.refresh()
             }
             .alert(
                 String(localized: "Blocking Error"),
@@ -106,12 +101,11 @@ struct SettingsView: View {
                 
                 Spacer()
                 
-                if healthAuthStatus != .authorized {
+                if permissionManager.healthAuthorizationStatus != .authorized {
                     Button(String(localized: "Request")) {
                         Task {
                             do {
-                                try await healthService.requestAuthorization()
-                                await refreshPermissionStatus()
+                                try await permissionManager.requestHealthPermission()
                             } catch {
                                 errorMessage = error.localizedDescription
                                 showingErrorAlert = true
@@ -141,12 +135,11 @@ struct SettingsView: View {
                 
                 Spacer()
                 
-                if !screenTimeAuthorized {
+                if !permissionManager.screenTimeAuthorized {
                     Button(String(localized: "Request")) {
                         Task {
                             do {
-                                try await blockerService.requestAuthorization()
-                                await refreshPermissionStatus()
+                                try await permissionManager.requestScreenTimePermission()
                             } catch {
                                 errorMessage = error.localizedDescription
                                 showingErrorAlert = true
@@ -252,7 +245,7 @@ struct SettingsView: View {
     // MARK: - Health Permission Display
     
     private var healthStatusIcon: String {
-        switch healthAuthStatus {
+        switch permissionManager.healthAuthorizationStatus {
         case .authorized:
             return "checkmark.circle.fill"
         case .denied:
@@ -263,7 +256,7 @@ struct SettingsView: View {
     }
     
     private var healthStatusColor: Color {
-        switch healthAuthStatus {
+        switch permissionManager.healthAuthorizationStatus {
         case .authorized:
             return .statusSuccess
         case .denied:
@@ -274,7 +267,7 @@ struct SettingsView: View {
     }
     
     private var healthStatusText: String {
-        switch healthAuthStatus {
+        switch permissionManager.healthAuthorizationStatus {
         case .authorized:
             return String(localized: "Access granted to read health data")
         case .denied:
@@ -287,28 +280,17 @@ struct SettingsView: View {
     // MARK: - Screen Time Permission Display
     
     private var screenTimeStatusIcon: String {
-        screenTimeAuthorized ? "checkmark.circle.fill" : "xmark.circle.fill"
+        permissionManager.screenTimeAuthorized ? "checkmark.circle.fill" : "xmark.circle.fill"
     }
     
     private var screenTimeStatusColor: Color {
-        screenTimeAuthorized ? .statusSuccess : .statusError
+        permissionManager.screenTimeAuthorized ? .statusSuccess : .statusError
     }
     
     private var screenTimeStatusText: String {
-        screenTimeAuthorized
+        permissionManager.screenTimeAuthorized
             ? String(localized: "Family Controls authorized")
             : String(localized: "Not authorized - app blocking unavailable")
-    }
-    
-    // MARK: - Methods
-    
-    /// Refreshes the current permission status from both services.
-    ///
-    /// **Why this is async?** We need to access actor-isolated properties,
-    /// which requires awaiting across actor boundaries.
-    private func refreshPermissionStatus() async {
-        healthAuthStatus = await healthService.authorizationStatus
-        screenTimeAuthorized = await blockerService.isAuthorized
     }
 }
 

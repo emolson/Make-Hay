@@ -28,6 +28,24 @@ private struct BlockerServiceKey: EnvironmentKey {
     static let defaultValue: any BlockerServiceProtocol = MockBlockerService()
 }
 
+// MARK: - Permission Manager
+
+/// Environment key for the shared `PermissionManager`.
+///
+/// **Why the concrete type?** `@Observable` observation tracking requires access through
+/// the concrete type's `ObservationRegistrar`. Protocol existentials break SwiftUI's
+/// automatic view invalidation, so we inject the concrete class — same pattern as
+/// `DashboardViewModelKey`.
+///
+/// **Why mock-backed default?** Mock services make previews zero-config — no HealthKit
+/// or FamilyControls entitlements needed in the canvas.
+private struct PermissionManagerKey: EnvironmentKey {
+    @MainActor static let defaultValue: PermissionManager = PermissionManager(
+        healthService: MockHealthService(),
+        blockerService: MockBlockerService()
+    )
+}
+
 // MARK: - Dashboard ViewModel
 
 /// Environment key for the shared `DashboardViewModel`.
@@ -76,5 +94,15 @@ extension EnvironmentValues {
     var dashboardViewModel: DashboardViewModel {
         get { self[DashboardViewModelKey.self] }
         set { self[DashboardViewModelKey.self] = newValue }
+    }
+
+    /// The shared permission manager providing HealthKit and Screen Time authorization
+    /// state as a single source of truth across all features.
+    ///
+    /// Inject at the app root: `.environment(\.permissionManager, container.permissionManager)`
+    /// Consume in any view: `@Environment(\.permissionManager) private var permissionManager`
+    var permissionManager: PermissionManager {
+        get { self[PermissionManagerKey.self] }
+        set { self[PermissionManagerKey.self] = newValue }
     }
 }

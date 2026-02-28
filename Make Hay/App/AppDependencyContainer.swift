@@ -31,6 +31,16 @@ final class AppDependencyContainer {
     /// app terminations.
     let backgroundHealthMonitor: any BackgroundHealthMonitorProtocol
 
+    /// Centralised permission state manager shared across all features.
+    ///
+    /// **Why here?** The container is the single factory for shared services. Owning
+    /// `PermissionManager` here guarantees one instance backs both Dashboard and Settings,
+    /// eliminating the duplicated query + persist logic that previously lived in each.
+    lazy var permissionManager: PermissionManager = PermissionManager(
+        healthService: healthService,
+        blockerService: blockerService
+    )
+
     /// Shared dashboard view model used across tabs for consistent gate state.
     lazy var dashboardViewModel: DashboardViewModel = DashboardViewModel(
         healthService: healthService,

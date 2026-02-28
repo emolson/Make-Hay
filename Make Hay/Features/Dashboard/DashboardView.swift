@@ -24,6 +24,11 @@ struct DashboardView: View {
     /// previews trivially mockable via environment key defaults.
     @Environment(\.dashboardViewModel) private var viewModel
     
+    /// Shared permission manager providing HealthKit and Screen Time authorization state.
+    /// **Why `@Environment`?** Permissions are now managed by a centralised
+    /// `PermissionManager` rather than duplicated in the ViewModel and SettingsView.
+    @Environment(\.permissionManager) private var permissionManager
+    
     /// Tracks the current scene phase to respond to app lifecycle events.
     /// **Why observe scenePhase?** We need to refresh health data and check the gate
     /// every time the app comes to the foreground. This ensures blocking status stays
@@ -80,6 +85,7 @@ struct DashboardView: View {
                     )
                 }
                 .task {
+                    await permissionManager.refresh()
                     await viewModel.onAppear()
                 }
                 .onDisappear {
@@ -101,7 +107,7 @@ struct DashboardView: View {
 
                             // Refresh permission status first — the user may have
                             // just returned from Settings after re-granting access.
-                            await viewModel.refreshPermissionStatus()
+                            await permissionManager.refresh()
                             
                             let previousGoalMet = viewModel.isGoalMet
                             await viewModel.loadGoals()
@@ -148,7 +154,7 @@ struct DashboardView: View {
             VStack(spacing: 24) {
                 // Permissions Banner — shown prominently above all other content
                 // when HealthKit or Screen Time access has been revoked.
-                if viewModel.isPermissionMissing {
+                if permissionManager.isPermissionMissing {
                     permissionsBanner
                 }
 
@@ -380,8 +386,8 @@ struct DashboardView: View {
     /// have been revoked. Delegates rendering to `PermissionsBannerView`.
     private var permissionsBanner: some View {
         PermissionsBannerView(
-            healthStatus: viewModel.healthPermissionStatus,
-            screenTimeAuthorized: viewModel.screenTimePermissionGranted
+            healthStatus: permissionManager.healthAuthorizationStatus,
+            screenTimeAuthorized: permissionManager.screenTimeAuthorized
         )
     }
     
