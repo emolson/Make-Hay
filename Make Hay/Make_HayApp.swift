@@ -10,7 +10,10 @@ import SwiftUI
 @main
 struct Make_HayApp: App {
     /// Dependency container holding all app services.
-    @State private var container = AppDependencyContainer()
+    /// **Why not `@State`?** The container is no longer `@Observable` — it's a plain
+    /// factory/lifecycle owner. We keep a strong reference so services live for the
+    /// app's lifetime; individual services are injected into the environment below.
+    private let container = AppDependencyContainer()
     
     /// Persisted flag indicating whether onboarding has been completed.
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
@@ -19,15 +22,14 @@ struct Make_HayApp: App {
         WindowGroup {
             if hasCompletedOnboarding {
                 MainTabView()
-                    .environment(container)
             } else {
                 OnboardingView(
-                    hasCompletedOnboarding: $hasCompletedOnboarding,
-                    healthService: container.healthService,
-                    blockerService: container.blockerService
+                    hasCompletedOnboarding: $hasCompletedOnboarding
                 )
-                .environment(container)
             }
         }
+        .environment(\.healthService, container.healthService)
+        .environment(\.blockerService, container.blockerService)
+        .environment(\.dashboardViewModel, container.dashboardViewModel)
     }
 }

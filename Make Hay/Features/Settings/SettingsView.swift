@@ -13,14 +13,13 @@ struct SettingsView: View {
     
     // MARK: - Dependencies
     
-    /// The health service for checking authorization status. Injected for testability.
-    let healthService: any HealthServiceProtocol
+    /// The health service for checking authorization status.
+    /// **Why `@Environment`?** Removes init-param threading from parent views and makes
+    /// previews zero-config — mock defaults are provided by `EnvironmentKeys.swift`.
+    @Environment(\.healthService) private var healthService
     
-    /// The blocker service for app selection. Injected for testability.
-    let blockerService: any BlockerServiceProtocol
-
-    /// Shared gate-state provider to keep Settings guard decisions aligned with Dashboard.
-    let goalStatusProvider: any GoalStatusProvider
+    /// The blocker service for app selection.
+    @Environment(\.blockerService) private var blockerService
     
     // MARK: - State
     
@@ -181,11 +180,7 @@ struct SettingsView: View {
     
     private var blockedAppsSection: some View {
         Section {
-            AppPickerView(
-                blockerService: blockerService,
-                healthService: healthService,
-                goalStatusProvider: goalStatusProvider
-            )
+            AppPickerView()
         } header: {
             Text(String(localized: "Blocked Apps"))
         } footer: {
@@ -320,16 +315,5 @@ struct SettingsView: View {
 // MARK: - Preview
 
 #Preview {
-    let healthService = MockHealthService()
-    let blockerService = MockBlockerService()
-    let dashboardViewModel = DashboardViewModel(
-        healthService: healthService,
-        blockerService: blockerService
-    )
-
-    SettingsView(
-        healthService: healthService,
-        blockerService: blockerService,
-        goalStatusProvider: dashboardViewModel
-    )
+    SettingsView()
 }

@@ -12,28 +12,41 @@ struct OnboardingView: View {
     /// Binding to track whether onboarding has been completed.
     @Binding var hasCompletedOnboarding: Bool
     
-    /// ViewModel managing onboarding state and permission requests.
-    @State private var viewModel: OnboardingViewModel
+    /// Services read from the environment — no init params needed.
+    /// **Why `@Environment`?** Removes service-threading from `Make_HayApp` and makes
+    /// previews zero-config via mock defaults in `EnvironmentKeys.swift`.
+    @Environment(\.healthService) private var healthService
+    @Environment(\.blockerService) private var blockerService
     
-    /// Creates a new OnboardingView with the specified services.
-    /// - Parameters:
-    ///   - hasCompletedOnboarding: Binding to the onboarding completion state.
-    ///   - healthService: The health service for HealthKit operations.
-    ///   - blockerService: The blocker service for Screen Time operations.
-    init(
-        hasCompletedOnboarding: Binding<Bool>,
-        healthService: any HealthServiceProtocol,
-        blockerService: any BlockerServiceProtocol
-    ) {
-        self._hasCompletedOnboarding = hasCompletedOnboarding
-        self._viewModel = State(initialValue: OnboardingViewModel(
-            healthService: healthService,
-            blockerService: blockerService
-        ))
-    }
+    /// ViewModel managing onboarding state and permission requests.
+    /// **Why optional?** Services from `@Environment` aren't available in `init`,
+    /// so the VM is created lazily in `.task`. The one-frame `nil` state is imperceptible.
+    @State private var viewModel: OnboardingViewModel?
     
     var body: some View {
-        TabView(selection: $viewModel.currentStep) {
+        Group {
+            if let viewModel {
+                onboardingContent(viewModel: viewModel)
+            } else {
+                Color.clear
+            }
+        }
+        .task {
+            if viewModel == nil {
+                viewModel = OnboardingViewModel(
+                    healthService: healthService,
+                    blockerService: blockerService
+                )
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private func onboardingContent(viewModel: OnboardingViewModel) -> some View {
+        TabView(selection: Binding(
+            get: { viewModel.currentStep },
+            set: { viewModel.currentStep = $0 }
+        )) {
             WelcomeStepView(onContinue: viewModel.goToNextStep)
                 .tag(OnboardingStep.welcome)
             
@@ -364,9 +377,7 @@ private struct ErrorMessageView: View {
 
 #Preview("Onboarding Flow") {
     OnboardingView(
-        hasCompletedOnboarding: .constant(false),
-        healthService: MockHealthService(),
-        blockerService: MockBlockerService()
+        hasCompletedOnboarding: .constant(false)
     )
 }
 

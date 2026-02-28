@@ -17,7 +17,12 @@ struct DashboardView: View {
     
     // MARK: - State
     
-    @State private var viewModel: DashboardViewModel
+    /// The shared dashboard view model, injected via the environment.
+    /// **Why `@Environment` instead of `@State`?** The VM is shared state owned by the
+    /// app root (via `AppDependencyContainer`), not by this view. `@Environment` is
+    /// semantically correct for shared, externally-owned dependencies and makes
+    /// previews trivially mockable via environment key defaults.
+    @Environment(\.dashboardViewModel) private var viewModel
     
     /// Tracks the current scene phase to respond to app lifecycle events.
     /// **Why observe scenePhase?** We need to refresh health data and check the gate
@@ -40,14 +45,6 @@ struct DashboardView: View {
     /// Controls presentation of the weekly schedule sheet.
     @State private var isShowingSchedule: Bool = false
     
-    // MARK: - Initialization
-    
-    /// Creates a DashboardView with the specified ViewModel.
-    /// - Parameter viewModel: The ViewModel managing dashboard state.
-    init(viewModel: DashboardViewModel) {
-        _viewModel = State(initialValue: viewModel)
-    }
-    
     // MARK: - Body
     
     var body: some View {
@@ -66,7 +63,10 @@ struct DashboardView: View {
                         .accessibilityLabel(String(localized: "Weekly Schedule"))
                     }
                 }
-                .sheet(isPresented: $viewModel.isShowingAddGoal) {
+                .sheet(isPresented: Binding(
+                    get: { viewModel.isShowingAddGoal },
+                    set: { viewModel.isShowingAddGoal = $0 }
+                )) {
                     AddGoalView(viewModel: viewModel)
                 }
                 .sheet(item: $editingGoal) { goal in
@@ -408,26 +408,24 @@ struct DashboardView: View {
 
 #Preview("Progress - 50%") {
     // MockHealthService defaults (5,000 steps, 350 kcal, 20 min) are
-    // reasonable for a "50%" preview. No async setup needed.
-    let mock = MockHealthService()
-    return DashboardView(viewModel: DashboardViewModel(healthService: mock, blockerService: MockBlockerService()))
+    // reasonable for a "50%" preview. Environment defaults provide mock services.
+    DashboardView()
 }
 
 #Preview("Goal Met") {
-    // Use a dedicated mock with high defaults to show the "goal met" state.
+    // Override the default environment with high-value mocks to show "goal met" state.
     let mock = MockHealthService(steps: 12_500, activeEnergy: 650, exerciseMinutes: 45)
-    return DashboardView(viewModel: DashboardViewModel(healthService: mock, blockerService: MockBlockerService()))
+    DashboardView()
+        .environment(\.dashboardViewModel, DashboardViewModel(healthService: mock, blockerService: MockBlockerService()))
 }
 
 #Preview("Loading State") {
-    let mock = MockHealthService()
-    let viewModel = DashboardViewModel(healthService: mock, blockerService: MockBlockerService())
-    return DashboardView(viewModel: viewModel)
+    DashboardView()
 }
 
 #Preview("Error State") {
-    let viewModel = DashboardViewModel(healthService: ErrorThrowingMockHealthService(), blockerService: MockBlockerService())
-    return DashboardView(viewModel: viewModel)
+    DashboardView()
+        .environment(\.dashboardViewModel, DashboardViewModel(healthService: ErrorThrowingMockHealthService(), blockerService: MockBlockerService()))
 }
 
 // MARK: - Preview Helper

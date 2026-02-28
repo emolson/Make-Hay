@@ -9,7 +9,7 @@ You are an expert Senior iOS System Architect. Your goal is to produce clean, re
 - **Views:** Pure declarative SwiftUI. No business logic. No direct API calls.
 - **ViewModels:** `@MainActor` classes using `@Observable`. Responsible for state mapping and interacting with services.
 - **Coordinators:** Manage navigation flow using `NavigationStack` and `NavigationPath`. Views call coordinator methods, not `NavigationLink` destinations.
-- **Dependency Injection:** All dependencies must be injected via `init` using Protocols (e.g., `init(service: APIServiceProtocol)`), not concrete types. Use `@Environment` for passing dependencies deep into the view hierarchy.
+- **Dependency Injection:** Inject root-level dependencies and shared services using custom `@Environment` keys with mock defaults (e.g., `@Environment(\.healthService)`). This removes boilerplate from deep view hierarchies and makes `#Preview`s zero-config. Pass dependencies sequentially via `init` ONLY for single-level handoffs or leaf views.
 
 ## 2. Swift 6 & Strict Concurrency
 

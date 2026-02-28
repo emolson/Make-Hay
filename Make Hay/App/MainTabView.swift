@@ -9,14 +9,15 @@ import SwiftUI
 
 /// The main tab-based navigation view for the app.
 /// Contains Dashboard and Settings tabs.
+///
+/// **Why `@Environment` instead of the container?** Each dependency is injected via
+/// a custom `EnvironmentKey`, so this view no longer couples to `AppDependencyContainer`.
+/// Child views read their own dependencies from the environment — no manual threading.
 struct MainTabView: View {
-    @Environment(AppDependencyContainer.self) private var container
     
     var body: some View {
         TabView {
-            DashboardView(
-                viewModel: container.dashboardViewModel
-            )
+            DashboardView()
             .tabItem {
                 Label(
                     String(localized: "Dashboard"),
@@ -25,11 +26,7 @@ struct MainTabView: View {
             }
             .accessibilityIdentifier("dashboardTab")
             
-            SettingsView(
-                healthService: container.healthService,
-                blockerService: container.blockerService,
-                goalStatusProvider: container.dashboardViewModel
-            )
+            SettingsView()
                 .tabItem {
                     Label(
                         String(localized: "Settings"),
@@ -43,5 +40,4 @@ struct MainTabView: View {
 
 #Preview {
     MainTabView()
-        .environment(AppDependencyContainer.preview())
 }

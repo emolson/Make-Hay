@@ -18,59 +18,105 @@ import SwiftUI
 /// You must test this feature on a physical device with Family Controls capability enabled.
 struct AppPickerView: View {
 
+    /// Identity token for the currently injected dependencies.
+    ///
+    /// **Why this exists:** If previews/tests swap environment services at runtime,
+    /// the view should rebuild its ViewModel so state stays aligned with the
+    /// latest dependency graph instead of retaining stale service references.
+    private struct DependencyIdentity: Equatable {
+        let blockerService: ObjectIdentifier
+        let healthService: ObjectIdentifier
+        let dashboardViewModel: ObjectIdentifier
+    }
+
+    // MARK: - Dependencies
+
+    /// Services read from the environment — no init params needed.
+    /// **Why `@Environment`?** Decouples this view from its parent (`SettingsView`),
+    /// eliminates service-threading boilerplate, and makes previews zero-config.
+    @Environment(\.blockerService) private var blockerService
+    @Environment(\.healthService) private var healthService
+    @Environment(\.dashboardViewModel) private var dashboardViewModel
+
     // MARK: - ViewModel
 
     /// Owned by this view via `@State` so the edit session survives SwiftUI re-renders.
-    @State private var viewModel: AppPickerViewModel
+    /// **Why optional?** Services aren't available in `init` when using `@Environment`,
+    /// so the VM is created lazily in `.task`. The one-frame `nil` state is imperceptible.
+    @State private var viewModel: AppPickerViewModel?
 
-    // MARK: - Initialization
-
-    /// - Parameter blockerService: Injected service for persisting selections and managing shields.
-    init(
-        blockerService: any BlockerServiceProtocol,
-        healthService: any HealthServiceProtocol,
-        goalStatusProvider: any GoalStatusProvider
-    ) {
-        _viewModel = State(
-            wrappedValue: AppPickerViewModel(
-                blockerService: blockerService,
-                healthService: healthService,
-                goalStatusProvider: goalStatusProvider
-            )
+    /// Stable identity for environment-injected dependencies.
+    ///
+    /// **Why cast to `AnyObject`?** Service protocols are actor-based references.
+    /// Using `ObjectIdentifier` lets `.task(id:)` detect reference changes cleanly.
+    private var dependencyIdentity: DependencyIdentity {
+        DependencyIdentity(
+            blockerService: ObjectIdentifier(blockerService as AnyObject),
+            healthService: ObjectIdentifier(healthService as AnyObject),
+            dashboardViewModel: ObjectIdentifier(dashboardViewModel)
         )
     }
 
     // MARK: - Body
 
     var body: some View {
+        Group {
+            if let viewModel {
+                pickerContent(viewModel: viewModel)
+            } else {
+                ProgressView()
+            }
+        }
+        .task(id: dependencyIdentity) {
+            let nextViewModel = AppPickerViewModel(
+                blockerService: blockerService,
+                healthService: healthService,
+                goalStatusProvider: dashboardViewModel
+            )
+            viewModel = nextViewModel
+            await nextViewModel.loadCurrentSelection()
+        }
+    }
+
+    // MARK: - Picker Content
+
+    /// Main picker content, extracted so the `viewModel` binding is non-optional.
+    @ViewBuilder
+    private func pickerContent(viewModel: AppPickerViewModel) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            selectionSummary
-            pickerButton
+            selectionSummary(viewModel: viewModel)
+            pickerButton(viewModel: viewModel)
         }
         .familyActivityPicker(
-            isPresented: $viewModel.isPickerPresented,
-            selection: $viewModel.draftSelection
+            isPresented: Binding(
+                get: { viewModel.isPickerPresented },
+                set: { viewModel.isPickerPresented = $0 }
+            ),
+            selection: Binding(
+                get: { viewModel.draftSelection },
+                set: { viewModel.draftSelection = $0 }
+            )
         )
         .onChange(of: viewModel.isPickerPresented) { _, isPresented in
-            // Commit draft only when picker dismisses, not on every binding mutation.
-            // If the user tapped Cancel, FamilyActivityPicker leaves draftSelection
-            // unchanged, so writing it back to the service is a harmless no-op.
             if !isPresented {
                 viewModel.pickerDismissed()
             }
         }
-        .task {
-            await viewModel.loadCurrentSelection()
-        }
         .alert(
             String(localized: "Error"),
-            isPresented: $viewModel.showError
+            isPresented: Binding(
+                get: { viewModel.showError },
+                set: { viewModel.showError = $0 }
+            )
         ) {
             Button(String(localized: "OK"), role: .cancel) {}
         } message: {
             Text(viewModel.errorMessage)
         }
-        .sheet(isPresented: $viewModel.showingPendingConfirmation) {
+        .sheet(isPresented: Binding(
+            get: { viewModel.showingPendingConfirmation },
+            set: { viewModel.showingPendingConfirmation = $0 }
+        )) {
             PendingGoalChangeView(context: .blockedAppsChange) {
                 Task {
                     await viewModel.schedulePendingSelection()
@@ -87,7 +133,7 @@ struct AppPickerView: View {
 
     /// Displays a summary of the committed (persisted) selection.
     @ViewBuilder
-    private var selectionSummary: some View {
+    private func selectionSummary(viewModel: AppPickerViewModel) -> some View {
         let appCount = viewModel.persistedSelection.applicationTokens.count
         let categoryCount = viewModel.persistedSelection.categoryTokens.count
 
@@ -122,7 +168,7 @@ struct AppPickerView: View {
     }
 
     /// Context-sensitive button: "Select Apps to Block" when empty, "Edit Blocked Apps" when populated.
-    private var pickerButton: some View {
+    private func pickerButton(viewModel: AppPickerViewModel) -> some View {
         Button {
             viewModel.presentPicker()
         } label: {
@@ -147,20 +193,9 @@ struct AppPickerView: View {
 /// **Note:** The FamilyActivityPicker does not render in the iOS Simulator.
 /// This preview demonstrates the layout with a mock service.
 #Preview {
-    let blockerService = MockBlockerService()
-    let healthService = MockHealthService()
-    let dashboardViewModel = DashboardViewModel(
-        healthService: healthService,
-        blockerService: blockerService
-    )
-
     List {
         Section {
-            AppPickerView(
-                blockerService: blockerService,
-                healthService: healthService,
-                goalStatusProvider: dashboardViewModel
-            )
+            AppPickerView()
         } header: {
             Text("Blocked Apps")
         }

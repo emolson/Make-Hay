@@ -10,8 +10,12 @@ import HealthKit
 
 /// Dependency Injection container that instantiates and holds references to all services.
 /// Injects protocols, not concrete types, to enable testability and preview support.
+///
+/// **Why no longer `@Observable`?** Individual services are now injected into the SwiftUI
+/// environment via custom `EnvironmentKey`s (see `EnvironmentKeys.swift`). The container
+/// remains as the factory and lifecycle owner at the app root but is no longer placed
+/// into the view hierarchy itself.
 @MainActor
-@Observable
 final class AppDependencyContainer {
     /// The health service for HealthKit operations.
     let healthService: any HealthServiceProtocol
@@ -28,7 +32,6 @@ final class AppDependencyContainer {
     let backgroundHealthMonitor: any BackgroundHealthMonitorProtocol
 
     /// Shared dashboard view model used across tabs for consistent gate state.
-    @ObservationIgnored
     lazy var dashboardViewModel: DashboardViewModel = DashboardViewModel(
         healthService: healthService,
         blockerService: blockerService
@@ -92,32 +95,6 @@ final class AppDependencyContainer {
         Task {
             await monitor.startMonitoring()
         }
-    }
-    
-    /// Creates a container with mock services configured for previews.
-    /// - Parameters:
-    ///   - mockSteps: The number of steps the mock health service should return.
-    ///   - isBlocking: Whether the mock blocker service should report blocking as active.
-    /// - Returns: A configured `AppDependencyContainer` for preview use.
-    static func preview(mockSteps: Int = 5_000, isBlocking: Bool = false) -> AppDependencyContainer {
-        let mockHealth = MockHealthService(steps: mockSteps)
-        let mockBlocker = MockBlockerService()
-        let mockMonitor = MockBackgroundHealthMonitor()
-        
-        // **Why no async Task?** Configuring mocks in a fire-and-forget Task
-        // causes race conditions where the view renders before values are set.
-        // MockHealthService now accepts initial values in its init.
-        if isBlocking {
-            Task {
-                try? await mockBlocker.updateShields(shouldBlock: true)
-            }
-        }
-        
-        return AppDependencyContainer(
-            healthService: mockHealth,
-            blockerService: mockBlocker,
-            backgroundHealthMonitor: mockMonitor
-        )
     }
 }
 
