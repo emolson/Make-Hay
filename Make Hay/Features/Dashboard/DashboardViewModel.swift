@@ -120,6 +120,14 @@ final class DashboardViewModel: GoalStatusProvider, ScheduleGoalManaging {
     /// Stores exercise minutes by goal ID.
     var currentExerciseMinutes: [UUID: Int] = [:]
     
+    /// Ticks forward every 60 seconds so time-based computed properties re-evaluate.
+    ///
+    /// **Why this exists?** `goalProgresses` calls `currentMinutesSinceMidnight()` (via
+    /// `Date()`), but since no `@Observable` property changes as real time passes,
+    /// SwiftUI never re-evaluates the computed property. Incrementing this counter in
+    /// a timer forces `@Observable` to notify views, keeping the time progress bar live.
+    var timeTick: UInt = 0
+    
     /// The user's weekly goal schedule, containing a `HealthGoal` per weekday.
     /// **Why weekly?** Allows different goals on different days (e.g., rest on weekends).
     var weeklySchedule: WeeklyGoalSchedule = WeeklyGoalSchedule.load()
@@ -157,8 +165,15 @@ final class DashboardViewModel: GoalStatusProvider, ScheduleGoalManaging {
     
     /// The last day number the app checked for steps.
     /// Used to detect when a new day has started and reset blocking accordingly.
+    ///
+    /// **Why manual UserDefaults instead of `@AppStorage`?** All other persisted data uses
+    /// `SharedStorage.appGroupDefaults`. Mixing suites is a maintenance risk. Using the
+    /// app group suite directly keeps storage consistent across the app and extensions.
     @ObservationIgnored
-    @AppStorage("lastCheckedDayNumber") private var lastCheckedDayNumber: Int = 0
+    private var lastCheckedDayNumber: Int {
+        get { SharedStorage.appGroupDefaults.integer(forKey: "lastCheckedDayNumber") }
+        set { SharedStorage.appGroupDefaults.set(newValue, forKey: "lastCheckedDayNumber") }
+    }
 
     /// Returns goal types that are available to be added (not currently enabled).
     /// **Why this matters?** Prevents users from adding duplicate goals and provides
@@ -232,6 +247,9 @@ final class DashboardViewModel: GoalStatusProvider, ScheduleGoalManaging {
         }
 
         if healthGoal.timeBlockGoal.isEnabled {
+            // Read timeTick to create an @Observable dependency so SwiftUI
+            // re-evaluates this property when the timer fires.
+            _ = timeTick
             let nowMinutes = Double(currentMinutesSinceMidnight())
             let unlockMinutes = Double(max(healthGoal.timeBlockGoal.clampedUnlockMinutes, 1))
             let progress = min(nowMinutes / unlockMinutes, 1.0)
@@ -267,6 +285,10 @@ final class DashboardViewModel: GoalStatusProvider, ScheduleGoalManaging {
     private let blockerService: any BlockerServiceProtocol
     private let timeUnlockScheduler: any TimeUnlockScheduling
     
+    /// Reference to the running time-tick timer task.
+    @ObservationIgnored
+    private var timeTickTask: Task<Void, Never>?
+
     // MARK: - Initialization
     
     /// Creates a new DashboardViewModel with the specified services.
@@ -293,6 +315,7 @@ final class DashboardViewModel: GoalStatusProvider, ScheduleGoalManaging {
     func onAppear() async {
         refreshGoalFromStorage()
         _ = try? await blockerService.applyPendingSelectionIfReady()
+        startTimeTickTimer()
         await requestAuthorizationAndLoad()
     }
     
@@ -355,6 +378,34 @@ final class DashboardViewModel: GoalStatusProvider, ScheduleGoalManaging {
     /// Clears the current error message.
     func dismissError() {
         errorMessage = nil
+    }
+
+    /// Starts a background timer that increments `timeTick` every 60 seconds.
+    ///
+    /// **Why 60 seconds?** The time-unlock progress bar displays minute-level granularity.
+    /// A 1-minute tick keeps the bar visually current without burning CPU.
+    func startTimeTickTimer() {
+        guard timeTickTask == nil else { return }
+        timeTickTask = Task { [weak self] in
+            // **Why `do/catch` instead of `try?` + manual isCancelled?**
+            // `Task.sleep` throws `CancellationError` when the task is cancelled.
+            // Catching the error is the canonical Swift Concurrency exit pattern —
+            // it avoids the redundant guard and makes intent explicit.
+            do {
+                while true {
+                    try await Task.sleep(for: .seconds(60))
+                    self?.timeTick &+= 1
+                }
+            } catch {
+                // CancellationError — timer stopped, exit cleanly.
+            }
+        }
+    }
+
+    /// Stops the time-tick timer.
+    func stopTimeTickTimer() {
+        timeTickTask?.cancel()
+        timeTickTask = nil
     }
     
     /// Adds a new goal of the specified type with the given target value.

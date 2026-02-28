@@ -192,13 +192,15 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
     /// (e.g., system pressure, daemon restart), and also prevents blocking apps that were
     /// already unblocked due to a transient error.
     private func evaluateAndUpdateShields() async {
-        // Load goal and check for enabled goals on `@MainActor` because
-        // `HealthGoal.load()` and `GoalBlockingEvaluator` are inferred as
-        // main-actor-isolated (they touch `SharedStorage.appGroupDefaults`).
-        let goal = await MainActor.run { HealthGoal.load() }
+        // Load today's goal from the weekly schedule.
+        // **Why `WeeklyGoalSchedule` instead of `HealthGoal.load()`?** The legacy single-goal
+        // key is only synced when `WeeklyGoalSchedule.save()` runs. After midnight, if no
+        // user interaction has occurred, the legacy key still holds yesterday's config. Reading
+        // from the weekly schedule and deriving today's goal avoids stale evaluations.
+        let goal = WeeklyGoalSchedule.load().todayGoal()
 
         // Bail early if no goals are configured — nothing to evaluate.
-        let hasGoals = await MainActor.run { GoalBlockingEvaluator.hasEnabledGoals(goal: goal) }
+        let hasGoals = GoalBlockingEvaluator.hasEnabledGoals(goal: goal)
         guard hasGoals else {
             Self.logger.debug("No enabled goals — skipping background evaluation.")
             return
@@ -229,9 +231,10 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
                 currentMinutesSinceMidnight: minutesSinceMidnight
             )
 
-            let shouldBlock = await MainActor.run {
-                GoalBlockingEvaluator.shouldBlock(goal: goal, snapshot: snapshot)
-            }
+            // **Why no MainActor hop?** `GoalBlockingEvaluator` contains pure static
+            // functions with no UI or actor-isolated state. Running on the background
+            // thread avoids unnecessary main-thread contention during the ~30s budget.
+            let shouldBlock = GoalBlockingEvaluator.shouldBlock(goal: goal, snapshot: snapshot)
 
             try await blockerService.updateShields(shouldBlock: shouldBlock)
 

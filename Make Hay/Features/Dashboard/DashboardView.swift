@@ -82,6 +82,13 @@ struct DashboardView: View {
                 .task {
                     await viewModel.onAppear()
                 }
+                .onDisappear {
+                    // Stop the 60-second tick timer to avoid unnecessary work
+                    // while the dashboard is off-screen.
+                    viewModel.stopTimeTickTimer()
+                    scenePhaseTask?.cancel()
+                    scenePhaseTask = nil
+                }
                 .onChange(of: scenePhase) { _, newPhase in
                     // Cancel any pending scene phase task to debounce rapid changes
                     scenePhaseTask?.cancel()
@@ -400,22 +407,15 @@ struct DashboardView: View {
 // MARK: - Preview
 
 #Preview("Progress - 50%") {
+    // MockHealthService defaults (5,000 steps, 350 kcal, 20 min) are
+    // reasonable for a "50%" preview. No async setup needed.
     let mock = MockHealthService()
-    Task { @MainActor in
-        await mock.setMockSteps(5_000)
-        await mock.setMockActiveEnergy(250)
-        await mock.setMockExerciseMinutes(10)
-    }
     return DashboardView(viewModel: DashboardViewModel(healthService: mock, blockerService: MockBlockerService()))
 }
 
 #Preview("Goal Met") {
-    let mock = MockHealthService()
-    Task { @MainActor in
-        await mock.setMockSteps(12_500)
-        await mock.setMockActiveEnergy(650)
-        await mock.setMockExerciseMinutes(45)
-    }
+    // Use a dedicated mock with high defaults to show the "goal met" state.
+    let mock = MockHealthService(steps: 12_500, activeEnergy: 650, exerciseMinutes: 45)
     return DashboardView(viewModel: DashboardViewModel(healthService: mock, blockerService: MockBlockerService()))
 }
 

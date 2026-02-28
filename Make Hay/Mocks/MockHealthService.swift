@@ -12,17 +12,31 @@ import HealthKit
 /// Uses an Actor to maintain thread safety while allowing configurable behavior.
 actor MockHealthService: HealthServiceProtocol {
     /// The number of steps to return from `fetchDailySteps()`.
-    var mockSteps: Int = 5_000
+    var mockSteps: Int
     /// The active energy to return from `fetchActiveEnergy()`.
-    var mockActiveEnergy: Double = 350
+    var mockActiveEnergy: Double
     /// The exercise minutes to return from `fetchExerciseMinutes(for:)`.
-    var mockExerciseMinutes: Int = 20
+    var mockExerciseMinutes: Int
     
     /// Mock authorization status.
     var mockAuthorizationStatus: HealthAuthorizationStatus = .authorized
     
     /// When `true`, all methods will throw their respective errors.
     var shouldThrowError: Bool = false
+
+    /// Creates a mock health service with configurable initial values.
+    ///
+    /// **Why an init?** Allows previews and tests to configure values synchronously
+    /// instead of using fire-and-forget `Task` blocks that race against view rendering.
+    init(
+        steps: Int = 5_000,
+        activeEnergy: Double = 350,
+        exerciseMinutes: Int = 20
+    ) {
+        self.mockSteps = steps
+        self.mockActiveEnergy = activeEnergy
+        self.mockExerciseMinutes = exerciseMinutes
+    }
     
     /// Returns the mock authorization status.
     var authorizationStatus: HealthAuthorizationStatus {

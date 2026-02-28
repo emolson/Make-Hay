@@ -115,7 +115,7 @@ struct EmergencyUnlockView: View {
     private var warningIcon: some View {
         Image(systemName: "exclamationmark.triangle.fill")
             .font(.system(size: 60))
-            .foregroundStyle(.statusWarning)
+            .foregroundStyle(Color.statusWarning)
             .accessibilityIdentifier("emergencyWarningIcon")
     }
     
@@ -174,7 +174,7 @@ struct EmergencyUnlockView: View {
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(.borderedProminent)
-        .tint(.statusWarning)
+        .tint(Color.statusWarning)
         .controlSize(.large)
         .disabled(!isCodeValid)
         .accessibilityIdentifier("confirmEmergencyButton")

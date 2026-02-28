@@ -8,7 +8,15 @@
 import Foundation
 
 /// Mock implementation of `TimeUnlockScheduling` for previews and tests.
-final class MockTimeUnlockScheduler: TimeUnlockScheduling, @unchecked Sendable {
+///
+/// **Why `@MainActor` instead of `@unchecked Sendable`?** The mutable stored properties
+/// (`scheduledUnlockMinutes`, `cancelCallCount`, etc.) had no synchronization.
+/// `@MainActor` isolation provides proper Swift 6 strict concurrency safety and is
+/// appropriate since this mock is only consumed in `@MainActor` contexts (previews,
+/// `DashboardViewModel`). The protocol methods are synchronous, which prevents using
+/// a plain `actor` (would require `nonisolated` on every method, defeating the purpose).
+@MainActor
+final class MockTimeUnlockScheduler: TimeUnlockScheduling, Sendable {
     private(set) var scheduledUnlockMinutes: Int?
     private(set) var cancelCallCount: Int = 0
     private(set) var scheduledWeeklyEntries: [WeekdayUnlockEntry] = []

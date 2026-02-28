@@ -20,7 +20,11 @@ struct AddGoalView: View {
     
     // MARK: - State
     
-    @State private var viewModel: DashboardViewModel
+    /// Non-owned reference to the shared ViewModel.
+    /// **Why `let` instead of `@State`?** This view does not own the ViewModel — it is
+    /// created by `DashboardView` and passed in. Using `@State` for a non-owned
+    /// `@Observable` reference is an anti-pattern that can cause lifecycle issues.
+    let viewModel: DashboardViewModel
     @State private var selectedGoalType: GoalType?
     
     // MARK: - Initialization
@@ -28,7 +32,7 @@ struct AddGoalView: View {
     /// Creates an AddGoalView with the specified ViewModel.
     /// - Parameter viewModel: The ViewModel managing dashboard state.
     init(viewModel: DashboardViewModel) {
-        _viewModel = State(initialValue: viewModel)
+        self.viewModel = viewModel
     }
     
     // MARK: - Body

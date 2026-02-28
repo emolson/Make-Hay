@@ -69,6 +69,10 @@ struct OnboardingView: View {
         .tabViewStyle(.page(indexDisplayMode: .always))
         .indexViewStyle(.page(backgroundDisplayMode: .always))
         .animation(.easeInOut, value: viewModel.currentStep)
+        // **Why disable scrolling?** The paged TabView allows free swiping between
+        // steps, which lets users skip the Health and Screen Time permission gates.
+        // Disabling scroll forces navigation through the gated "Continue" buttons.
+        .scrollDisabled(true)
     }
 }
 

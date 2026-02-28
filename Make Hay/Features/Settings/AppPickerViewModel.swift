@@ -197,8 +197,12 @@ final class AppPickerViewModel {
     ///
     /// **Policy:** Always prefer fresh health reads for gate decisions. If fresh
     /// fetch fails, default to deferred mode to avoid accidental bypass.
+    ///
+    /// **Why `WeeklyGoalSchedule` instead of `HealthGoal.load()`?** The legacy single-goal
+    /// key is only synced on `WeeklyGoalSchedule.save()`. After midnight with no user
+    /// interaction, the legacy key holds yesterday's config, causing wrong gate decisions.
     private func shouldDeferEdit() async -> Bool {
-        let latestGoal = HealthGoal.load()
+        let latestGoal = WeeklyGoalSchedule.load().todayGoal()
         return await GoalGatekeeper.shouldDeferEdits(
             goal: latestGoal,
             healthService: healthService
@@ -207,8 +211,10 @@ final class AppPickerViewModel {
 
     /// Persists the given selection and synchronises shields.
     ///
-    /// **Why update shields immediately?** The user expects the change to take effect
-    /// right away; delaying until the next goal evaluation would be confusing.
+    /// **Why check goal status before shielding?** The user may have already met their
+    /// goals (apps unblocked). Blindly calling `updateShields(shouldBlock: true)` when
+    /// apps are selected would re-lock them even though the user earned the unlock.
+    /// We consult `goalStatusProvider.isBlocking` to preserve the current gate state.
     private func persistSelection(_ selection: FamilyActivitySelection) async {
         isSaving = true
         defer { isSaving = false }
@@ -217,7 +223,9 @@ final class AppPickerViewModel {
             await blockerService.cancelPendingSelection()
             try await blockerService.setSelection(selection)
             let hasApps = !selection.applicationTokens.isEmpty || !selection.categoryTokens.isEmpty
-            try await blockerService.updateShields(shouldBlock: hasApps)
+            // Only block if apps are selected AND the user hasn't already met their goals.
+            let shouldBlock = hasApps && goalStatusProvider.isBlocking
+            try await blockerService.updateShields(shouldBlock: shouldBlock)
 
             persistedSelection = selection
             UINotificationFeedbackGenerator().notificationOccurred(.success)

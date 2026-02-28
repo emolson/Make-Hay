@@ -23,10 +23,27 @@ actor HealthService: HealthServiceProtocol {
     private let exerciseTimeType: HKQuantityType
     private let workoutType: HKWorkoutType
     
+    /// Injected key-value store used for lightweight persistence.
+    ///
+    /// **Why injected?** `HealthService` only needs a single persisted flag
+    /// (`hasRequestedHealthAuthorization`). Coupling directly to `UserDefaults.standard`
+    /// makes unit tests hit real disk defaults, introducing flakiness. Injecting a
+    /// `KeyValueStorage` protocol lets tests supply an in-memory stub instead.
+    private let storage: any KeyValueStorage
+
+    /// Key used to persist the authorization-requested flag.
+    private static let authRequestedKey = "hasRequestedHealthAuthorization"
+
     /// Tracks whether authorization was successfully requested.
-    /// **Why track this?** HealthKit doesn't expose a clear "authorized" status for read-only types
-    /// due to privacy. We track successful authorization requests ourselves.
-    private var hasRequestedAuthorization: Bool = false
+    /// **Why persisted?** HealthKit doesn't expose a clear "authorized" status for read-only
+    /// types due to privacy. We track successful authorization requests ourselves. This flag
+    /// must survive app restarts, otherwise `authorizationStatus` incorrectly reports
+    /// `.notDetermined` on every launch (since HealthKit returns `.sharingDenied` for
+    /// read-only grants due to privacy).
+    private var hasRequestedAuthorization: Bool {
+        get { storage.bool(forKey: Self.authRequestedKey) }
+        set { storage.set(newValue, forKey: Self.authRequestedKey) }
+    }
     
     /// Maximum time to wait for a single HealthKit query before treating it as failed.
     ///
@@ -38,13 +55,15 @@ actor HealthService: HealthServiceProtocol {
     // MARK: - Initialization
     
     /// Creates a new HealthService instance.
-    /// - Parameter healthStore: An optional shared `HKHealthStore`. If nil, a new store is created.
+    /// - Parameters:
+    ///   - healthStore: An optional shared `HKHealthStore`. If nil, a new store is created.
+    ///   - storage: Key-value store for persisting lightweight flags. Defaults to `UserDefaults.standard`.
     /// - Throws: `HealthServiceError.healthKitNotAvailable` if HealthKit is not available on this device.
     ///
     /// **Why accept an external store?** Apple recommends a single `HKHealthStore` per app.
     /// Sharing the store with `BackgroundHealthMonitor` avoids duplicate connections to the
     /// HealthKit daemon and keeps observer query registration consistent.
-    init(healthStore: HKHealthStore? = nil) throws {
+    init(healthStore: HKHealthStore? = nil, storage: any KeyValueStorage = UserDefaults.standard) throws {
         guard HKHealthStore.isHealthDataAvailable() else {
             throw HealthServiceError.healthKitNotAvailable
         }
@@ -59,6 +78,7 @@ actor HealthService: HealthServiceProtocol {
         }
         
         self.healthStore = healthStore ?? HKHealthStore()
+        self.storage = storage
         self.stepType = stepType
         self.activeEnergyType = activeEnergyType
         self.exerciseTimeType = exerciseTimeType

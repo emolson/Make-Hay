@@ -270,11 +270,11 @@ struct SettingsView: View {
     private var healthStatusColor: Color {
         switch healthAuthStatus {
         case .authorized:
-            return .green
+            return .statusSuccess
         case .denied:
-            return .red
+            return .statusError
         case .notDetermined:
-            return .orange
+            return .statusWarning
         }
     }
     
@@ -296,7 +296,7 @@ struct SettingsView: View {
     }
     
     private var screenTimeStatusColor: Color {
-        screenTimeAuthorized ? .green : .red
+        screenTimeAuthorized ? .statusSuccess : .statusError
     }
     
     private var screenTimeStatusText: String {

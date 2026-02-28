@@ -100,14 +100,15 @@ final class AppDependencyContainer {
     ///   - isBlocking: Whether the mock blocker service should report blocking as active.
     /// - Returns: A configured `AppDependencyContainer` for preview use.
     static func preview(mockSteps: Int = 5_000, isBlocking: Bool = false) -> AppDependencyContainer {
-        let mockHealth = MockHealthService()
+        let mockHealth = MockHealthService(steps: mockSteps)
         let mockBlocker = MockBlockerService()
         let mockMonitor = MockBackgroundHealthMonitor()
         
-        // Configure mocks asynchronously
-        Task {
-            await mockHealth.setMockSteps(mockSteps)
-            if isBlocking {
+        // **Why no async Task?** Configuring mocks in a fire-and-forget Task
+        // causes race conditions where the view renders before values are set.
+        // MockHealthService now accepts initial values in its init.
+        if isBlocking {
+            Task {
                 try? await mockBlocker.updateShields(shouldBlock: true)
             }
         }

@@ -443,6 +443,9 @@ struct GoalConfigurationView: View {
     
     private func removeGoal() {
         Task {
+            isSaving = true
+            defer { isSaving = false }
+
             // Build the proposed goal configuration with the goal removed
             let currentDayGoal = viewModel.weeklySchedule.goal(for: weekday)
             var newGoal = currentDayGoal
