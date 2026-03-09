@@ -92,7 +92,7 @@ struct GoalEvaluationSnapshot: Sendable {
 /// must stay perfectly aligned so users cannot bypass one flow via another.
 enum GoalBlockingEvaluator {
     /// Returns whether any goal is enabled in the provided configuration.
-    static func hasEnabledGoals(goal: HealthGoal) -> Bool {
+    nonisolated static func hasEnabledGoals(goal: HealthGoal) -> Bool {
         goal.stepGoal.isEnabled
             || goal.activeEnergyGoal.isEnabled
             || goal.exerciseGoals.contains(where: { $0.isEnabled })
@@ -100,14 +100,14 @@ enum GoalBlockingEvaluator {
     }
 
     /// Returns whether the configured goals are met for the provided snapshot.
-    static func isGoalMet(goal: HealthGoal, snapshot: GoalEvaluationSnapshot) -> Bool {
+    nonisolated static func isGoalMet(goal: HealthGoal, snapshot: GoalEvaluationSnapshot) -> Bool {
         let progresses = goalProgresses(goal: goal, snapshot: snapshot)
         guard !progresses.isEmpty else { return true }
         return progresses.allSatisfy { $0 }
     }
 
     /// Returns whether apps should currently be blocked.
-    static func shouldBlock(goal: HealthGoal, snapshot: GoalEvaluationSnapshot) -> Bool {
+    nonisolated static func shouldBlock(goal: HealthGoal, snapshot: GoalEvaluationSnapshot) -> Bool {
         let enabledGoals = goalProgresses(goal: goal, snapshot: snapshot)
         guard !enabledGoals.isEmpty else { return false }
         return !isGoalMet(goal: goal, snapshot: snapshot)
@@ -118,14 +118,14 @@ enum GoalBlockingEvaluator {
     /// **Why separate from `shouldBlock`?** Deferral gate logic is intentionally
     /// decoupled from blocking logic so each can evolve independently. All enabled
     /// goals must be met before the user is permitted to weaken their commitments.
-    static func shouldDeferChanges(goal: HealthGoal, snapshot: GoalEvaluationSnapshot) -> Bool {
+    nonisolated static func shouldDeferChanges(goal: HealthGoal, snapshot: GoalEvaluationSnapshot) -> Bool {
         let progresses = goalProgresses(goal: goal, snapshot: snapshot)
         guard !progresses.isEmpty else { return false }
         // Strict: ALL enabled goals must be met before edits are allowed
         return !progresses.allSatisfy { $0 }
     }
 
-    private static func goalProgresses(goal: HealthGoal, snapshot: GoalEvaluationSnapshot) -> [Bool] {
+    private nonisolated static func goalProgresses(goal: HealthGoal, snapshot: GoalEvaluationSnapshot) -> [Bool] {
         var progresses: [Bool] = []
 
         if goal.stepGoal.isEnabled {
@@ -156,7 +156,7 @@ enum GoalBlockingEvaluator {
 /// **Policy:** If fresh health reads fail, default to deferral so users cannot
 /// bypass goal guards due to transient fetch failures.
 enum GoalGatekeeper {
-    static func shouldDeferEdits(
+    nonisolated static func shouldDeferEdits(
         goal: HealthGoal,
         healthService: any HealthServiceProtocol,
         now: Date = Date()
@@ -180,7 +180,7 @@ enum GoalGatekeeper {
         }
     }
 
-    private static func fetchExerciseMinutesByGoalId(
+    private nonisolated static func fetchExerciseMinutesByGoalId(
         goal: HealthGoal,
         healthService: any HealthServiceProtocol
     ) async throws -> [UUID: Int] {
@@ -196,7 +196,7 @@ enum GoalGatekeeper {
         return result
     }
 
-    private static func currentMinutesSinceMidnight(date: Date) -> Int {
+    private nonisolated static func currentMinutesSinceMidnight(date: Date) -> Int {
         let components = Calendar.current.dateComponents([.hour, .minute], from: date)
         return (components.hour ?? 0) * 60 + (components.minute ?? 0)
     }
@@ -441,7 +441,7 @@ enum ExerciseType: String, Codable, CaseIterable, Sendable, Identifiable {
         }
     }
     
-    var hkWorkoutActivityType: HKWorkoutActivityType? {
+    nonisolated var hkWorkoutActivityType: HKWorkoutActivityType? {
         switch self {
         case .any:
             return nil
@@ -697,15 +697,15 @@ enum ExerciseType: String, Codable, CaseIterable, Sendable, Identifiable {
 }
 
 extension TimeBlockGoal {
-    private static let minutesInDay: Int = 24 * 60
+    private nonisolated static let minutesInDay: Int = 24 * 60
 
     /// Returns the unlock time clamped to a valid day range.
-    var clampedUnlockMinutes: Int {
+    nonisolated var clampedUnlockMinutes: Int {
         min(max(unlockTimeMinutes, 0), Self.minutesInDay - 1)
     }
 
     /// Returns the unlock time as a Date on the given day.
-    func unlockDate(on date: Date = Date()) -> Date {
+    nonisolated func unlockDate(on date: Date = Date()) -> Date {
         let hour = clampedUnlockMinutes / 60
         let minute = clampedUnlockMinutes % 60
         return Calendar.current.date(
@@ -717,7 +717,7 @@ extension TimeBlockGoal {
     }
 
     /// Updates the unlock time using a Date value.
-    mutating func setUnlockTime(_ date: Date) {
+    nonisolated mutating func setUnlockTime(_ date: Date) {
         let components = Calendar.current.dateComponents([.hour, .minute], from: date)
         let minutes = (components.hour ?? 0) * 60 + (components.minute ?? 0)
         unlockTimeMinutes = min(max(minutes, 0), Self.minutesInDay - 1)
@@ -725,10 +725,10 @@ extension TimeBlockGoal {
 }
 
 extension HealthGoal {
-    static let storageKey: String = "healthGoalData"
-    static let legacyStepKey: String = "dailyStepGoal"
+    nonisolated static let storageKey: String = "healthGoalData"
+    nonisolated static let legacyStepKey: String = "dailyStepGoal"
     
-    static func load(from defaults: UserDefaults = SharedStorage.appGroupDefaults) -> HealthGoal {
+    nonisolated static func load(from defaults: UserDefaults = SharedStorage.appGroupDefaults) -> HealthGoal {
         if let dataString = defaults.string(forKey: storageKey),
            let data = dataString.data(using: .utf8),
            let goal = try? JSONDecoder().decode(HealthGoal.self, from: data) {
@@ -746,18 +746,18 @@ extension HealthGoal {
         return HealthGoal()
     }
     
-    static func save(_ goal: HealthGoal, to defaults: UserDefaults = SharedStorage.appGroupDefaults) {
+    nonisolated static func save(_ goal: HealthGoal, to defaults: UserDefaults = SharedStorage.appGroupDefaults) {
         if let encoded = encode(goal) {
             defaults.set(encoded, forKey: storageKey)
         }
     }
     
-    static func encode(_ goal: HealthGoal) -> String? {
+    nonisolated static func encode(_ goal: HealthGoal) -> String? {
         guard let data = try? JSONEncoder().encode(goal) else { return nil }
         return String(data: data, encoding: .utf8)
     }
     
-    static func decode(from string: String) -> HealthGoal? {
+    nonisolated static func decode(from string: String) -> HealthGoal? {
         guard let data = string.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(HealthGoal.self, from: data)
     }

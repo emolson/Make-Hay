@@ -54,31 +54,31 @@ struct WeeklyGoalSchedule: Codable, Sendable, Equatable {
 
     /// Returns the `HealthGoal` for the given weekday (1–7).
     /// Falls back to a default `HealthGoal` if the key is somehow missing.
-    func goal(for weekday: Int) -> HealthGoal {
+    nonisolated func goal(for weekday: Int) -> HealthGoal {
         days[weekday] ?? HealthGoal()
     }
 
     /// Returns the `HealthGoal` for today based on the current calendar.
-    func todayGoal(calendar: Calendar = .current) -> HealthGoal {
+    nonisolated func todayGoal(calendar: Calendar = .current) -> HealthGoal {
         let weekday = calendar.component(.weekday, from: Date())
         return goal(for: weekday)
     }
 
     /// Updates the goal for a specific weekday.
-    mutating func setGoal(_ goal: HealthGoal, for weekday: Int) {
+    nonisolated mutating func setGoal(_ goal: HealthGoal, for weekday: Int) {
         days[weekday] = goal
     }
 
     // MARK: - Persistence
 
-    static let storageKey: String = "weeklyGoalScheduleData"
+    nonisolated static let storageKey: String = "weeklyGoalScheduleData"
 
     /// Loads the weekly schedule from App Group `UserDefaults`.
     ///
     /// **Migration strategy:** If no schedule exists, reads the legacy single `HealthGoal`
     /// and replicates it to all 7 days. This ensures existing users get a valid schedule
     /// on first launch after the update with zero onboarding friction.
-    static func load(from defaults: UserDefaults = SharedStorage.appGroupDefaults) -> WeeklyGoalSchedule {
+    nonisolated static func load(from defaults: UserDefaults = SharedStorage.appGroupDefaults) -> WeeklyGoalSchedule {
         // Try loading the weekly schedule
         if let dataString = defaults.string(forKey: storageKey),
            let data = dataString.data(using: .utf8),
@@ -94,7 +94,7 @@ struct WeeklyGoalSchedule: Codable, Sendable, Equatable {
     }
 
     /// Saves the weekly schedule to App Group `UserDefaults`.
-    static func save(_ schedule: WeeklyGoalSchedule, to defaults: UserDefaults = SharedStorage.appGroupDefaults) {
+    nonisolated static func save(_ schedule: WeeklyGoalSchedule, to defaults: UserDefaults = SharedStorage.appGroupDefaults) {
         if let encoded = encode(schedule) {
             defaults.set(encoded, forKey: storageKey)
         }
@@ -105,12 +105,12 @@ struct WeeklyGoalSchedule: Codable, Sendable, Equatable {
         HealthGoal.save(todayGoal, to: defaults)
     }
 
-    static func encode(_ schedule: WeeklyGoalSchedule) -> String? {
+    nonisolated static func encode(_ schedule: WeeklyGoalSchedule) -> String? {
         guard let data = try? JSONEncoder().encode(schedule) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
-    static func decode(from string: String) -> WeeklyGoalSchedule? {
+    nonisolated static func decode(from string: String) -> WeeklyGoalSchedule? {
         guard let data = string.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(WeeklyGoalSchedule.self, from: data)
     }
@@ -122,18 +122,18 @@ extension WeeklyGoalSchedule {
 
     /// Ordered weekday indices starting from the user's calendar first weekday.
     /// Returns `[Int]` of weekday values (1–7) in the order the user's locale expects.
-    static func orderedWeekdays(calendar: Calendar = .current) -> [Int] {
+    nonisolated static func orderedWeekdays(calendar: Calendar = .current) -> [Int] {
         let first = calendar.firstWeekday // e.g. 1 (Sunday) in US, 2 (Monday) in EU
         return (0..<7).map { (first - 1 + $0) % 7 + 1 }
     }
 
     /// Short weekday symbol (e.g. "Mon") for a weekday index (1–7).
-    static func shortName(for weekday: Int, calendar: Calendar = .current) -> String {
+    nonisolated static func shortName(for weekday: Int, calendar: Calendar = .current) -> String {
         calendar.shortWeekdaySymbols[weekday - 1]
     }
 
     /// Full weekday name (e.g. "Monday") for a weekday index (1–7).
-    static func fullName(for weekday: Int, calendar: Calendar = .current) -> String {
+    nonisolated static func fullName(for weekday: Int, calendar: Calendar = .current) -> String {
         calendar.weekdaySymbols[weekday - 1]
     }
 }
