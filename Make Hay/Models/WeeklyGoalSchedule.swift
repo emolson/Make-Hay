@@ -14,8 +14,6 @@ import Foundation
 /// independently configure steps, active energy, exercise, time-unlock, and blocking strategy.
 ///
 /// **Storage:** JSON-encoded in App Group `UserDefaults` under `"weeklyGoalScheduleData"`.
-/// On first load, if no schedule exists, the existing single `HealthGoal` is silently migrated
-/// to all 7 days — zero friction for existing users.
 struct WeeklyGoalSchedule: Codable, Sendable, Equatable {
 
     // MARK: - Properties
@@ -28,24 +26,10 @@ struct WeeklyGoalSchedule: Codable, Sendable, Equatable {
 
     /// Creates a schedule with the provided per-day goals.
     /// Missing days default to a fresh `HealthGoal()`.
-    init(days: [Int: HealthGoal] = [:]) {
+    nonisolated init(days: [Int: HealthGoal] = [:]) {
         var filled: [Int: HealthGoal] = [:]
         for weekday in 1...7 {
             filled[weekday] = days[weekday] ?? HealthGoal()
-        }
-        self.days = filled
-    }
-
-    /// Creates a schedule where every day uses the same `HealthGoal`.
-    /// **Why?** Used during migration from the legacy single-goal model.
-    init(repeating goal: HealthGoal) {
-        var filled: [Int: HealthGoal] = [:]
-        for weekday in 1...7 {
-            // Strip pending state — pending changes belong to the old model
-            var clean = goal
-            clean.pendingGoal = nil
-            clean.pendingGoalEffectiveDate = nil
-            filled[weekday] = clean
         }
         self.days = filled
     }
@@ -73,24 +57,29 @@ struct WeeklyGoalSchedule: Codable, Sendable, Equatable {
 
     nonisolated static let storageKey: String = "weeklyGoalScheduleData"
 
+    private enum CodingKeys: String, CodingKey {
+        case days
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(days: try container.decodeIfPresent([Int: HealthGoal].self, forKey: .days) ?? [:])
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(days, forKey: .days)
+    }
+
     /// Loads the weekly schedule from App Group `UserDefaults`.
-    ///
-    /// **Migration strategy:** If no schedule exists, reads the legacy single `HealthGoal`
-    /// and replicates it to all 7 days. This ensures existing users get a valid schedule
-    /// on first launch after the update with zero onboarding friction.
     nonisolated static func load(from defaults: UserDefaults = SharedStorage.appGroupDefaults) -> WeeklyGoalSchedule {
-        // Try loading the weekly schedule
         if let dataString = defaults.string(forKey: storageKey),
            let data = dataString.data(using: .utf8),
            let schedule = try? JSONDecoder().decode(WeeklyGoalSchedule.self, from: data) {
             return schedule
         }
 
-        // Migration: read the legacy single HealthGoal and replicate to all days
-        let legacyGoal = HealthGoal.load(from: defaults)
-        let migrated = WeeklyGoalSchedule(repeating: legacyGoal)
-        save(migrated, to: defaults)
-        return migrated
+        return WeeklyGoalSchedule()
     }
 
     /// Saves the weekly schedule to App Group `UserDefaults`.
@@ -98,11 +87,6 @@ struct WeeklyGoalSchedule: Codable, Sendable, Equatable {
         if let encoded = encode(schedule) {
             defaults.set(encoded, forKey: storageKey)
         }
-        // Also keep the legacy key in sync with today's goal so the
-        // DeviceActivityMonitor extension can still read it.
-        let todayWeekday = Calendar.current.component(.weekday, from: Date())
-        let todayGoal = schedule.goal(for: todayWeekday)
-        HealthGoal.save(todayGoal, to: defaults)
     }
 
     nonisolated static func encode(_ schedule: WeeklyGoalSchedule) -> String? {

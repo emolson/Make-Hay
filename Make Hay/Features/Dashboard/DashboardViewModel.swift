@@ -663,10 +663,8 @@ final class DashboardViewModel: GoalStatusProvider, ScheduleGoalManaging {
     // MARK: - Private Methods
 
     /// Persists the weekly schedule to App Group UserDefaults.
-    ///
-    /// **Why centralize?** Every mutation site calls this instead of `HealthGoal.save`.
-    /// The schedule's save method also keeps the legacy `healthGoalData` key in sync
-    /// for the DeviceActivityMonitor extension.
+    /// **Why centralize?** Every mutation site funnels through one normalization and
+    /// persistence path so per-day goals stay internally consistent.
     private func saveSchedule() {
         for weekday in 1...7 {
             var dayGoal = weeklySchedule.goal(for: weekday)
@@ -729,10 +727,7 @@ final class DashboardViewModel: GoalStatusProvider, ScheduleGoalManaging {
         return wasBlocking && !isBlocking
     }
     
-    /// Refreshes the daily step goal from UserDefaults.
-    /// **Why read from UserDefaults directly?** The goal is set in SettingsView using
-    /// @AppStorage. We read it here to ensure the dashboard always reflects the latest
-    /// goal, even if the user changes it in Settings without restarting the app.
+    /// Reloads the latest weekly goal schedule from shared storage.
     private func refreshGoalFromStorage() {
         weeklySchedule = WeeklyGoalSchedule.load()
         todayWeekday = Calendar.current.component(.weekday, from: Date())
@@ -741,14 +736,9 @@ final class DashboardViewModel: GoalStatusProvider, ScheduleGoalManaging {
         var didApplyAny = false
         for weekday in 1...7 {
             var dayGoal = weeklySchedule.goal(for: weekday)
-            if dayGoal.blockingStrategy != .all {
-                dayGoal.blockingStrategy = .all
-                didApplyAny = true
-            }
-            if var pending = dayGoal.pendingGoal, pending.blockingStrategy != .all {
+            if var pending = dayGoal.pendingGoal {
                 pending.blockingStrategy = .all
                 dayGoal.pendingGoal = pending
-                didApplyAny = true
             }
             if dayGoal.applyPendingIfReady() {
                 dayGoal.blockingStrategy = .all
@@ -785,7 +775,6 @@ final class DashboardViewModel: GoalStatusProvider, ScheduleGoalManaging {
 
         if entries.isEmpty {
             timeUnlockScheduler.cancelWeeklyUnlocks()
-            timeUnlockScheduler.cancelDailyUnlock()
             return
         }
 

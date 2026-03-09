@@ -197,10 +197,6 @@ final class AppPickerViewModel {
     ///
     /// **Policy:** Always prefer fresh health reads for gate decisions. If fresh
     /// fetch fails, default to deferred mode to avoid accidental bypass.
-    ///
-    /// **Why `WeeklyGoalSchedule` instead of `HealthGoal.load()`?** The legacy single-goal
-    /// key is only synced on `WeeklyGoalSchedule.save()`. After midnight with no user
-    /// interaction, the legacy key holds yesterday's config, causing wrong gate decisions.
     private func shouldDeferEdit() async -> Bool {
         let latestGoal = WeeklyGoalSchedule.load().todayGoal()
         return await GoalGatekeeper.shouldDeferEdits(

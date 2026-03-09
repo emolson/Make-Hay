@@ -192,11 +192,7 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
     /// (e.g., system pressure, daemon restart), and also prevents blocking apps that were
     /// already unblocked due to a transient error.
     private func evaluateAndUpdateShields() async {
-        // Load today's goal from the weekly schedule.
-        // **Why `WeeklyGoalSchedule` instead of `HealthGoal.load()`?** The legacy single-goal
-        // key is only synced when `WeeklyGoalSchedule.save()` runs. After midnight, if no
-        // user interaction has occurred, the legacy key still holds yesterday's config. Reading
-        // from the weekly schedule and deriving today's goal avoids stale evaluations.
+        // Load today's goal from the canonical weekly schedule.
         let goal = WeeklyGoalSchedule.load().todayGoal()
 
         // Bail early if no goals are configured — nothing to evaluate.

@@ -166,12 +166,12 @@ Implement the Daily Goal persistence and UI for "Make Hay".
 1. **Model**: Create `Models/HealthGoal.swift`:
    ```swift
    struct HealthGoal: Codable, Sendable, Equatable {
-       var dailyStepTarget: Int = 10_000
+       var stepGoal: StepGoal = .init(target: 10_000)
    }
    ```
 
 2. **Settings View**: Create `Features/Settings/SettingsView.swift`.
-   - Use `@AppStorage("dailyStepGoal")` to persist the goal (default 10,000).
+   - Persist the goal through the app's shared goal storage model.
    - Provide a `Stepper` to adjust the value in increments of 500.
    - Display the current goal value.
    - Use `String(localized:)` for all labels.
@@ -179,9 +179,9 @@ Implement the Daily Goal persistence and UI for "Make Hay".
    - Include a `#Preview`.
 
 3. **Dashboard Update**: Update `DashboardViewModel`:
-   - Add a `@Published var dailyStepGoal: Int` (read from AppStorage or injected).
-   - Calculate `var progress: Double { Double(currentSteps) / Double(dailyStepGoal) }`.
-   - Expose `var isGoalMet: Bool { currentSteps >= dailyStepGoal }`.
+   - Add state for the current step target.
+   - Calculate `var progress: Double { Double(currentSteps) / Double(stepGoalTarget) }`.
+   - Expose `var isGoalMet: Bool { currentSteps >= stepGoalTarget }`.
 
 4. **UI Update**: Update `DashboardView`:
    - Add a circular progress ring showing progress toward the goal.
@@ -292,7 +292,7 @@ Connect the Health data to the Blocker service in "Make Hay".
 
 2. **Logic** in `checkGoalStatus()`:
    ```swift
-   if currentSteps < dailyStepGoal {
+   if currentSteps < stepGoalTarget {
        try? await blockerService.updateShields(shouldBlock: true)
    } else {
        try? await blockerService.updateShields(shouldBlock: false)

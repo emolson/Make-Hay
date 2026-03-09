@@ -9,9 +9,6 @@ import DeviceActivity
 import Foundation
 
 extension DeviceActivityName {
-    /// Daily monitor that starts at the configured unlock time (legacy, single-schedule).
-    static let makeHayTimeUnlock = Self("makeHay.timeUnlock")
-
     /// Per-weekday monitors: `makeHay.timeUnlock.1` (Sunday) … `makeHay.timeUnlock.7` (Saturday).
     ///
     /// **Why per-weekday?** The weekly schedule allows different unlock times on each day.
@@ -34,14 +31,9 @@ struct WeekdayUnlockEntry: Sendable {
 
 /// Protocol for scheduling time-based unlock monitoring.
 protocol TimeUnlockScheduling: Sendable {
-    /// Schedules a single daily unlock (legacy convenience, wraps `scheduleWeeklyUnlocks`).
-    func scheduleDailyUnlock(at unlockMinutes: Int) throws
-    /// Cancels all unlock monitors.
-    func cancelDailyUnlock()
-
     /// Schedules per-weekday unlock monitors for each entry.
     ///
-    /// **Why replace the single schedule?** The weekly model needs different unlock
+    /// **Why per-weekday monitors?** The weekly model needs different unlock
     /// times per day. Each entry becomes a separate `DeviceActivitySchedule` keyed
     /// to `makeHay.timeUnlock.<weekday>`.
     func scheduleWeeklyUnlocks(_ entries: [WeekdayUnlockEntry]) throws
@@ -52,38 +44,11 @@ protocol TimeUnlockScheduling: Sendable {
 /// Live scheduler backed by `DeviceActivityCenter`.
 struct DeviceActivityTimeUnlockScheduler: TimeUnlockScheduling {
 
-    // MARK: - Legacy Single Schedule
-
-    func scheduleDailyUnlock(at unlockMinutes: Int) throws {
-        let clampedMinutes = min(max(unlockMinutes, 0), (24 * 60) - 1)
-        let startHour = clampedMinutes / 60
-        let startMinute = clampedMinutes % 60
-
-        let start = DateComponents(hour: startHour, minute: startMinute)
-        let end = DateComponents(hour: 23, minute: 59)
-
-        let schedule = DeviceActivitySchedule(
-            intervalStart: start,
-            intervalEnd: end,
-            repeats: true
-        )
-
-        try DeviceActivityCenter().startMonitoring(.makeHayTimeUnlock, during: schedule)
-    }
-
-    func cancelDailyUnlock() {
-        DeviceActivityCenter().stopMonitoring([.makeHayTimeUnlock])
-    }
-
-    // MARK: - Weekly Schedule
-
     func scheduleWeeklyUnlocks(_ entries: [WeekdayUnlockEntry]) throws {
         let center = DeviceActivityCenter()
 
         // Stop all existing per-weekday monitors first
         cancelWeeklyUnlocks()
-        // Also cancel legacy single monitor
-        cancelDailyUnlock()
 
         for entry in entries {
             let clampedMinutes = min(max(entry.unlockMinutes, 0), (24 * 60) - 1)

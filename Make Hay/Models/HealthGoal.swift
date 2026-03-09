@@ -30,6 +30,24 @@ struct HealthGoal: Codable, Sendable, Equatable {
     /// The date when pending changes should take effect (midnight of next day).
     /// **Why Date?** Allows precise comparison to determine when to apply changes.
     var pendingGoalEffectiveDate: Date?
+
+    nonisolated init(
+        stepGoal: StepGoal = .init(),
+        activeEnergyGoal: ActiveEnergyGoal = .init(),
+        exerciseGoals: [ExerciseGoal] = [],
+        timeBlockGoal: TimeBlockGoal = .init(),
+        blockingStrategy: BlockingStrategy = .all,
+        pendingGoal: PendingHealthGoal? = nil,
+        pendingGoalEffectiveDate: Date? = nil
+    ) {
+        self.stepGoal = stepGoal
+        self.activeEnergyGoal = activeEnergyGoal
+        self.exerciseGoals = exerciseGoals
+        self.timeBlockGoal = timeBlockGoal
+        self.blockingStrategy = blockingStrategy
+        self.pendingGoal = pendingGoal
+        self.pendingGoalEffectiveDate = pendingGoalEffectiveDate
+    }
     
     /// Applies pending goal changes if the effective date has passed.
     /// **Why mutating?** This modifies the current goal state by copying pending values.
@@ -55,6 +73,40 @@ struct HealthGoal: Codable, Sendable, Equatable {
         
         return true
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case stepGoal
+        case activeEnergyGoal
+        case exerciseGoals
+        case timeBlockGoal
+        case blockingStrategy
+        case pendingGoal
+        case pendingGoalEffectiveDate
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            stepGoal: try container.decodeIfPresent(StepGoal.self, forKey: .stepGoal) ?? .init(),
+            activeEnergyGoal: try container.decodeIfPresent(ActiveEnergyGoal.self, forKey: .activeEnergyGoal) ?? .init(),
+            exerciseGoals: try container.decodeIfPresent([ExerciseGoal].self, forKey: .exerciseGoals) ?? [],
+            timeBlockGoal: try container.decodeIfPresent(TimeBlockGoal.self, forKey: .timeBlockGoal) ?? .init(),
+            blockingStrategy: try container.decodeIfPresent(BlockingStrategy.self, forKey: .blockingStrategy) ?? .all,
+            pendingGoal: try container.decodeIfPresent(PendingHealthGoal.self, forKey: .pendingGoal),
+            pendingGoalEffectiveDate: try container.decodeIfPresent(Date.self, forKey: .pendingGoalEffectiveDate)
+        )
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(stepGoal, forKey: .stepGoal)
+        try container.encode(activeEnergyGoal, forKey: .activeEnergyGoal)
+        try container.encode(exerciseGoals, forKey: .exerciseGoals)
+        try container.encode(timeBlockGoal, forKey: .timeBlockGoal)
+        try container.encode(blockingStrategy, forKey: .blockingStrategy)
+        try container.encodeIfPresent(pendingGoal, forKey: .pendingGoal)
+        try container.encodeIfPresent(pendingGoalEffectiveDate, forKey: .pendingGoalEffectiveDate)
+    }
 }
 
 /// Snapshot of a goal change scheduled to apply later.
@@ -65,6 +117,20 @@ struct PendingHealthGoal: Codable, Sendable, Equatable {
     var exerciseGoals: [ExerciseGoal]
     var timeBlockGoal: TimeBlockGoal
     var blockingStrategy: BlockingStrategy
+
+    nonisolated init(
+        stepGoal: StepGoal,
+        activeEnergyGoal: ActiveEnergyGoal,
+        exerciseGoals: [ExerciseGoal],
+        timeBlockGoal: TimeBlockGoal,
+        blockingStrategy: BlockingStrategy
+    ) {
+        self.stepGoal = stepGoal
+        self.activeEnergyGoal = activeEnergyGoal
+        self.exerciseGoals = exerciseGoals
+        self.timeBlockGoal = timeBlockGoal
+        self.blockingStrategy = blockingStrategy
+    }
     
     init(from goal: HealthGoal) {
         self.stepGoal = goal.stepGoal
@@ -72,6 +138,34 @@ struct PendingHealthGoal: Codable, Sendable, Equatable {
         self.exerciseGoals = goal.exerciseGoals
         self.timeBlockGoal = goal.timeBlockGoal
         self.blockingStrategy = goal.blockingStrategy
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case stepGoal
+        case activeEnergyGoal
+        case exerciseGoals
+        case timeBlockGoal
+        case blockingStrategy
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            stepGoal: try container.decode(StepGoal.self, forKey: .stepGoal),
+            activeEnergyGoal: try container.decode(ActiveEnergyGoal.self, forKey: .activeEnergyGoal),
+            exerciseGoals: try container.decode([ExerciseGoal].self, forKey: .exerciseGoals),
+            timeBlockGoal: try container.decode(TimeBlockGoal.self, forKey: .timeBlockGoal),
+            blockingStrategy: try container.decode(BlockingStrategy.self, forKey: .blockingStrategy)
+        )
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(stepGoal, forKey: .stepGoal)
+        try container.encode(activeEnergyGoal, forKey: .activeEnergyGoal)
+        try container.encode(exerciseGoals, forKey: .exerciseGoals)
+        try container.encode(timeBlockGoal, forKey: .timeBlockGoal)
+        try container.encode(blockingStrategy, forKey: .blockingStrategy)
     }
 }
 
@@ -206,12 +300,60 @@ enum GoalGatekeeper {
 struct StepGoal: Codable, Sendable, Equatable {
     var isEnabled: Bool = true
     var target: Int = 8_000
+
+    nonisolated init(isEnabled: Bool = true, target: Int = 8_000) {
+        self.isEnabled = isEnabled
+        self.target = target
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case isEnabled
+        case target
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            isEnabled: try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true,
+            target: try container.decodeIfPresent(Int.self, forKey: .target) ?? 8_000
+        )
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(isEnabled, forKey: .isEnabled)
+        try container.encode(target, forKey: .target)
+    }
 }
 
 /// Configuration for an active energy (calories) goal.
 struct ActiveEnergyGoal: Codable, Sendable, Equatable {
     var isEnabled: Bool = false
     var target: Int = 500
+
+    nonisolated init(isEnabled: Bool = false, target: Int = 500) {
+        self.isEnabled = isEnabled
+        self.target = target
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case isEnabled
+        case target
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            isEnabled: try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? false,
+            target: try container.decodeIfPresent(Int.self, forKey: .target) ?? 500
+        )
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(isEnabled, forKey: .isEnabled)
+        try container.encode(target, forKey: .target)
+    }
 }
 
 /// Configuration for an exercise minutes goal.
@@ -220,6 +362,43 @@ struct ExerciseGoal: Codable, Sendable, Equatable, Identifiable {
     var isEnabled: Bool = true
     var targetMinutes: Int = 30
     var exerciseType: ExerciseType = .any
+
+    nonisolated init(
+        id: UUID = UUID(),
+        isEnabled: Bool = true,
+        targetMinutes: Int = 30,
+        exerciseType: ExerciseType = .any
+    ) {
+        self.id = id
+        self.isEnabled = isEnabled
+        self.targetMinutes = targetMinutes
+        self.exerciseType = exerciseType
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case isEnabled
+        case targetMinutes
+        case exerciseType
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID(),
+            isEnabled: try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true,
+            targetMinutes: try container.decodeIfPresent(Int.self, forKey: .targetMinutes) ?? 30,
+            exerciseType: try container.decodeIfPresent(ExerciseType.self, forKey: .exerciseType) ?? .any
+        )
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(isEnabled, forKey: .isEnabled)
+        try container.encode(targetMinutes, forKey: .targetMinutes)
+        try container.encode(exerciseType, forKey: .exerciseType)
+    }
 }
 
 /// Configuration for a time-based unlock goal.
@@ -232,14 +411,34 @@ struct TimeBlockGoal: Codable, Sendable, Equatable {
     var isEnabled: Bool = false
     /// Minutes since midnight (0-1439). Default is 7 PM (19:00).
     var unlockTimeMinutes: Int = 19 * 60
+
+    nonisolated init(isEnabled: Bool = false, unlockTimeMinutes: Int = 19 * 60) {
+        self.isEnabled = isEnabled
+        self.unlockTimeMinutes = unlockTimeMinutes
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case isEnabled
+        case unlockTimeMinutes
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            isEnabled: try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? false,
+            unlockTimeMinutes: try container.decodeIfPresent(Int.self, forKey: .unlockTimeMinutes) ?? 19 * 60
+        )
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(isEnabled, forKey: .isEnabled)
+        try container.encode(unlockTimeMinutes, forKey: .unlockTimeMinutes)
+    }
 }
 
 /// Defines when apps unlock relative to enabled goals.
-///
-/// **Why keep `.any`?** Retained for `Codable` backwards-compatibility with
-/// persisted data. All runtime paths enforce `.all`; `.any` is never written.
 enum BlockingStrategy: String, Codable, Sendable {
-    case any
     case all
 }
 
@@ -724,41 +923,3 @@ extension TimeBlockGoal {
     }
 }
 
-extension HealthGoal {
-    nonisolated static let storageKey: String = "healthGoalData"
-    nonisolated static let legacyStepKey: String = "dailyStepGoal"
-    
-    nonisolated static func load(from defaults: UserDefaults = SharedStorage.appGroupDefaults) -> HealthGoal {
-        if let dataString = defaults.string(forKey: storageKey),
-           let data = dataString.data(using: .utf8),
-           let goal = try? JSONDecoder().decode(HealthGoal.self, from: data) {
-            return goal
-        }
-        
-        let legacyStepGoal = defaults.integer(forKey: legacyStepKey)
-        if legacyStepGoal > 0 {
-            var migrated = HealthGoal()
-            migrated.stepGoal.target = legacyStepGoal
-            save(migrated, to: defaults)
-            return migrated
-        }
-        
-        return HealthGoal()
-    }
-    
-    nonisolated static func save(_ goal: HealthGoal, to defaults: UserDefaults = SharedStorage.appGroupDefaults) {
-        if let encoded = encode(goal) {
-            defaults.set(encoded, forKey: storageKey)
-        }
-    }
-    
-    nonisolated static func encode(_ goal: HealthGoal) -> String? {
-        guard let data = try? JSONEncoder().encode(goal) else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-    
-    nonisolated static func decode(from string: String) -> HealthGoal? {
-        guard let data = string.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(HealthGoal.self, from: data)
-    }
-}

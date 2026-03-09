@@ -16,9 +16,9 @@ import Foundation
 /// in-memory stub instead.
 protocol KeyValueStorage: Sendable {
     /// Returns the Boolean value associated with the specified key.
-    func bool(forKey key: String) -> Bool
+    nonisolated func bool(forKey key: String) -> Bool
     /// Sets the value of the specified key to the specified Boolean value.
-    func set(_ value: Bool, forKey key: String)
+    nonisolated func set(_ value: Bool, forKey key: String)
 }
 
 // MARK: - UserDefaults Conformance
