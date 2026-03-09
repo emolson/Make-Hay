@@ -205,7 +205,7 @@ enum GoalGatekeeper {
 /// Configuration for a steps goal.
 struct StepGoal: Codable, Sendable, Equatable {
     var isEnabled: Bool = true
-    var target: Int = 10_000
+    var target: Int = 8_000
 }
 
 /// Configuration for an active energy (calories) goal.
