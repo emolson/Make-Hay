@@ -17,6 +17,7 @@ struct OnboardingView: View {
     /// previews zero-config via mock defaults in `EnvironmentKeys.swift`.
     @Environment(\.healthService) private var healthService
     @Environment(\.blockerService) private var blockerService
+    @Environment(\.openURL) private var openURL
     
     /// ViewModel managing onboarding state and permission requests.
     /// **Why optional?** Services from `@Environment` aren't available in `init`,
@@ -33,10 +34,12 @@ struct OnboardingView: View {
         }
         .task {
             if viewModel == nil {
-                viewModel = OnboardingViewModel(
+                let onboardingViewModel = OnboardingViewModel(
                     healthService: healthService,
                     blockerService: blockerService
                 )
+                viewModel = onboardingViewModel
+                await onboardingViewModel.refreshPermissionState()
             }
         }
     }
@@ -57,6 +60,7 @@ struct OnboardingView: View {
                 onRequestPermission: {
                     Task { await viewModel.requestHealthPermission() }
                 },
+                onSkip: viewModel.goToNextStep,
                 onContinue: viewModel.goToNextStep,
                 onDismissError: viewModel.dismissError
             )
@@ -70,6 +74,7 @@ struct OnboardingView: View {
                     Task { await viewModel.requestScreenTimePermission() }
                 },
                 onContinue: viewModel.goToNextStep,
+                onOpenSettings: openAppSettings,
                 onDismissError: viewModel.dismissError
             )
             .tag(OnboardingStep.screenTime)
@@ -86,6 +91,11 @@ struct OnboardingView: View {
         // steps, which lets users skip the Health and Screen Time permission gates.
         // Disabling scroll forces navigation through the gated "Continue" buttons.
         .scrollDisabled(true)
+    }
+
+    private func openAppSettings() {
+        guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else { return }
+        openURL(settingsURL)
     }
 }
 
@@ -109,7 +119,7 @@ private struct WelcomeStepView: View {
                 .fontWeight(.bold)
                 .multilineTextAlignment(.center)
             
-            Text(String(localized: "Earn your screen time by hitting your health goals."))
+            Text(String(localized: "Two quick permissions to get started."))
                 .font(.title3)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -136,6 +146,7 @@ private struct HealthPermissionStepView: View {
     let isLoading: Bool
     let errorMessage: String?
     let onRequestPermission: () -> Void
+    let onSkip: () -> Void
     let onContinue: () -> Void
     let onDismissError: () -> Void
     
@@ -148,12 +159,12 @@ private struct HealthPermissionStepView: View {
                 .foregroundStyle(isPermissionGranted ? Color.statusSuccess : Color.statusError)
                 .accessibilityIdentifier("healthIcon")
             
-            Text(String(localized: "Connect Apple Health"))
+            Text(String(localized: "Allow Apple Health"))
                 .font(.largeTitle)
                 .fontWeight(.bold)
                 .multilineTextAlignment(.center)
             
-            Text(String(localized: "We need access to your health data to track your goals and unlock your apps."))
+            Text(String(localized: "Used to read your health goal progress."))
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -178,12 +189,20 @@ private struct HealthPermissionStepView: View {
                 )
                 .accessibilityIdentifier("healthContinueButton")
             } else {
-                OnboardingButton(
-                    title: String(localized: "Connect Apple Health"),
-                    isLoading: isLoading,
-                    action: onRequestPermission
-                )
-                .accessibilityIdentifier("connectHealthButton")
+                VStack(spacing: 12) {
+                    OnboardingButton(
+                        title: String(localized: "Allow Health"),
+                        isLoading: isLoading,
+                        action: onRequestPermission
+                    )
+                    .accessibilityIdentifier("connectHealthButton")
+
+                    SecondaryOnboardingButton(
+                        title: String(localized: "Skip for Now"),
+                        action: onSkip
+                    )
+                    .accessibilityIdentifier("skipHealthButton")
+                }
             }
             
             Spacer()
@@ -200,6 +219,7 @@ private struct ScreenTimePermissionStepView: View {
     let errorMessage: String?
     let onRequestPermission: () -> Void
     let onContinue: () -> Void
+    let onOpenSettings: () -> Void
     let onDismissError: () -> Void
     
     var body: some View {
@@ -211,12 +231,12 @@ private struct ScreenTimePermissionStepView: View {
                 .foregroundStyle(isPermissionGranted ? Color.statusSuccess : Color.statusPermissionPending)
                 .accessibilityIdentifier("screenTimeIcon")
             
-            Text(String(localized: "Enable Screen Time"))
+            Text(String(localized: "Allow Screen Time"))
                 .font(.largeTitle)
                 .fontWeight(.bold)
                 .multilineTextAlignment(.center)
             
-            Text(String(localized: "Allow Screen Time access to block distracting apps until you reach your daily step goal."))
+            Text(String(localized: "Needed to block apps until you hit your goals."))
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -241,12 +261,22 @@ private struct ScreenTimePermissionStepView: View {
                 )
                 .accessibilityIdentifier("screenTimeContinueButton")
             } else {
-                OnboardingButton(
-                    title: String(localized: "Enable Screen Time"),
-                    isLoading: isLoading,
-                    action: onRequestPermission
-                )
-                .accessibilityIdentifier("enableScreenTimeButton")
+                VStack(spacing: 12) {
+                    OnboardingButton(
+                        title: String(localized: "Allow Screen Time"),
+                        isLoading: isLoading,
+                        action: onRequestPermission
+                    )
+                    .accessibilityIdentifier("enableScreenTimeButton")
+
+                    if errorMessage != nil {
+                        SecondaryOnboardingButton(
+                            title: String(localized: "Open Settings"),
+                            action: onOpenSettings
+                        )
+                        .accessibilityIdentifier("openScreenTimeSettingsButton")
+                    }
+                }
             }
             
             Spacer()
@@ -256,7 +286,7 @@ private struct ScreenTimePermissionStepView: View {
     }
 }
 
-/// Completion step confirming setup is done.
+/// Completion step confirming permission setup is done.
 private struct CompletionStepView: View {
     let onGetStarted: () -> Void
     
@@ -269,12 +299,12 @@ private struct CompletionStepView: View {
                 .foregroundStyle(Color.statusSuccess)
                 .accessibilityIdentifier("completionIcon")
             
-            Text(String(localized: "You're All Set!"))
+            Text(String(localized: "Ready to Start"))
                 .font(.largeTitle)
                 .fontWeight(.bold)
                 .multilineTextAlignment(.center)
             
-            Text(String(localized: "Start walking to earn your screen time. The more you move, the more you can use your favorite apps!"))
+            Text(String(localized: "Next, add a goal and choose apps to block."))
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -321,6 +351,25 @@ private struct OnboardingButton: View {
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .disabled(isLoading)
+        .padding(.horizontal, 24)
+    }
+}
+
+/// A secondary styled button for onboarding actions (greyed out secondary action).
+private struct SecondaryOnboardingButton: View {
+    let title: String
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.onboardingSecondaryBackground)
+                .foregroundStyle(Color.onboardingSecondaryContent)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
         .padding(.horizontal, 24)
     }
 }
@@ -387,6 +436,7 @@ private struct ErrorMessageView: View {
         isLoading: false,
         errorMessage: nil,
         onRequestPermission: {},
+        onSkip: {},
         onContinue: {},
         onDismissError: {}
     )
@@ -398,6 +448,7 @@ private struct ErrorMessageView: View {
         isLoading: false,
         errorMessage: nil,
         onRequestPermission: {},
+        onSkip: {},
         onContinue: {},
         onDismissError: {}
     )
@@ -409,7 +460,44 @@ private struct ErrorMessageView: View {
         isLoading: false,
         errorMessage: "Permission to access health data was denied.",
         onRequestPermission: {},
+        onSkip: {},
         onContinue: {},
+        onDismissError: {}
+    )
+}
+
+#Preview("Screen Time Step - Not Granted") {
+    ScreenTimePermissionStepView(
+        isPermissionGranted: false,
+        isLoading: false,
+        errorMessage: nil,
+        onRequestPermission: {},
+        onContinue: {},
+        onOpenSettings: {},
+        onDismissError: {}
+    )
+}
+
+#Preview("Screen Time Step - Granted") {
+    ScreenTimePermissionStepView(
+        isPermissionGranted: true,
+        isLoading: false,
+        errorMessage: nil,
+        onRequestPermission: {},
+        onContinue: {},
+        onOpenSettings: {},
+        onDismissError: {}
+    )
+}
+
+#Preview("Screen Time Step - Error") {
+    ScreenTimePermissionStepView(
+        isPermissionGranted: false,
+        isLoading: false,
+        errorMessage: "Screen Time access was denied.",
+        onRequestPermission: {},
+        onContinue: {},
+        onOpenSettings: {},
         onDismissError: {}
     )
 }

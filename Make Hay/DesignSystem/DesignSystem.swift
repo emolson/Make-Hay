@@ -38,6 +38,8 @@ extension Color {
     /// Onboarding-specific semantic colors.
     static var onboardingWelcome: Color { .yellow }
     static var onboardingButtonContent: Color { .white }
+    static var onboardingSecondaryBackground: Color { Color(uiColor: .secondarySystemFill) }
+    static var onboardingSecondaryContent: Color { Color(uiColor: .label) }
 }
 
 // MARK: - Fonts

@@ -167,7 +167,7 @@ struct SettingsView: View {
         } header: {
             Text(String(localized: "Permissions"))
         } footer: {
-            Text(String(localized: "Both permissions are required for the app to function correctly. Pull to refresh status."))
+            Text(String(localized: "Screen Time is required to block apps. Apple Health lets Make Hay track your health goals. Pull to refresh status."))
         }
     }
     

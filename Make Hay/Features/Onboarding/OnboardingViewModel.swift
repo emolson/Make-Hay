@@ -58,6 +58,8 @@ final class OnboardingViewModel {
     ) {
         self.healthService = healthService
         self.blockerService = blockerService
+        self.healthPermissionGranted = SharedStorage.healthPermissionGranted
+        self.screenTimePermissionGranted = SharedStorage.screenTimePermissionGranted
     }
     
     // MARK: - Navigation
@@ -67,25 +69,21 @@ final class OnboardingViewModel {
         guard let nextStep = OnboardingStep(rawValue: currentStep.rawValue + 1) else { return }
         currentStep = nextStep
     }
-    
-    /// Returns to the previous onboarding step.
-    func goToPreviousStep() {
-        guard let previousStep = OnboardingStep(rawValue: currentStep.rawValue - 1) else { return }
-        currentStep = previousStep
-    }
-    
-    /// Whether the user can proceed to the next step from the current position.
-    var canProceed: Bool {
-        switch currentStep {
-        case .welcome:
-            return true
-        case .health:
-            return healthPermissionGranted
-        case .screenTime:
-            return screenTimePermissionGranted
-        case .done:
-            return true
-        }
+
+    /// Refreshes permission state from the live services.
+    ///
+    /// **Why refresh on launch?** If the user already granted a permission in an earlier
+    /// session, onboarding should immediately reflect that state instead of briefly showing
+    /// the unchecked version of the step.
+    func refreshPermissionState() async {
+        let latestHealthStatus = await healthService.authorizationStatus
+        let latestScreenTimeStatus = await blockerService.isAuthorized
+
+        healthPermissionGranted = latestHealthStatus == .authorized
+        screenTimePermissionGranted = latestScreenTimeStatus
+
+        SharedStorage.healthPermissionGranted = healthPermissionGranted
+        SharedStorage.screenTimePermissionGranted = screenTimePermissionGranted
     }
     
     // MARK: - Permission Requests

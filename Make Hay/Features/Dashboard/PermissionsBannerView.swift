@@ -38,7 +38,7 @@ struct PermissionsBannerView: View {
                     .font(.title3)
                     .foregroundStyle(Color.statusPermissionMissing)
 
-                Text(String(localized: "Permissions Missing"))
+                Text(String(localized: "Permissions Needed"))
                     .font(.headline)
                     .foregroundStyle(.primary)
             }
@@ -84,11 +84,11 @@ struct PermissionsBannerView: View {
         let screenTimeMissing = !screenTimeAuthorized
 
         if healthMissing && screenTimeMissing {
-            return String(localized: "Apple Health and Screen Time access have been revoked. The app cannot track your goals or block apps without both permissions.")
+            return String(localized: "Turn on Apple Health to track goals and Screen Time to block apps.")
         } else if healthMissing {
-            return String(localized: "Apple Health access has been revoked. The app cannot track your health goals without this permission.")
+            return String(localized: "Turn on Apple Health to track your health goals.")
         } else {
-            return String(localized: "Screen Time access has been revoked. The app cannot block apps without this permission.")
+            return String(localized: "Turn on Screen Time to block apps until you hit your goals.")
         }
     }
 }

@@ -138,4 +138,10 @@ actor MockHealthService: HealthServiceProtocol {
     func setShouldThrowError(_ shouldThrow: Bool) {
         shouldThrowError = shouldThrow
     }
+
+    /// Configures the mock authorization status used by `authorizationStatus`.
+    /// - Parameter status: The status to report.
+    func setMockAuthorizationStatus(_ status: HealthAuthorizationStatus) {
+        mockAuthorizationStatus = status
+    }
 }

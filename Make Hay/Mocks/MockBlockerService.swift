@@ -121,4 +121,10 @@ actor MockBlockerService: BlockerServiceProtocol {
     func setShouldThrowError(_ shouldThrow: Bool) {
         shouldThrowError = shouldThrow
     }
+
+    /// Configures the mock authorization state used by `isAuthorized`.
+    /// - Parameter isAuthorized: Whether Screen Time should report as authorized.
+    func setMockIsAuthorized(_ isAuthorized: Bool) {
+        mockIsAuthorized = isAuthorized
+    }
 }
