@@ -56,7 +56,12 @@ struct DashboardView: View {
         NavigationStack {
             content
                 .navigationTitle(String(localized: "Make Hay"))
-                .background(Color.surfaceGrouped)
+                .background(
+                    viewModel.isGoalMet
+                        ? Color.surfaceUnlocked.ignoresSafeArea()
+                        : Color.surfaceGrouped.ignoresSafeArea()
+                )
+                .animation(.easeInOut(duration: 1.0), value: viewModel.isGoalMet)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
@@ -159,14 +164,8 @@ struct DashboardView: View {
                 }
 
                 // Banners Section
-                VStack(spacing: 12) {
-                    if viewModel.healthGoal.pendingGoal != nil {
-                        pendingChangeBanner
-                    }
-                    
-                    if viewModel.isGoalMet {
-                        goalMetBanner
-                    }
+                if viewModel.healthGoal.pendingGoal != nil {
+                    pendingChangeBanner
                 }
                 
                 if viewModel.goalProgresses.isEmpty {
@@ -181,10 +180,6 @@ struct DashboardView: View {
                         
                         goalProgressRows
                     }
-                }
-                
-                if viewModel.isBlocking {
-                    blockingStatusBadge
                 }
             }
             .padding(.vertical, 24)
@@ -275,34 +270,6 @@ struct DashboardView: View {
         .padding(.horizontal, 16)
     }
     
-    /// Inline celebration banner shown when all goals are met.
-    /// **Why inline instead of overlay?** Keeps the progress bars visible at 100%
-    /// so the user can see exactly what they achieved, while clearly communicating
-    /// that apps are unlocked.
-    private var goalMetBanner: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.title2)
-                .foregroundStyle(Color.statusSuccess)
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text(String(localized: "Goals Met!"))
-                    .font(.headline)
-                    .foregroundStyle(Color.statusSuccess)
-                
-                Text(String(localized: "Apps Unlocked"))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            
-            Spacer()
-        }
-        .padding()
-        .background(Color.statusSuccess.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal, 16)
-        .accessibilityIdentifier("goalMetBanner")
-    }
-    
     /// Banner shown when a goal change is scheduled for tomorrow.
     /// **Why show this?** Provides transparency about pending changes and allows cancellation.
     private var pendingChangeBanner: some View {
@@ -364,24 +331,6 @@ struct DashboardView: View {
         }
     }
     
-    /// Badge indicating apps are currently blocked.
-    /// **Why show this?** Provides clear feedback that the blocking feature is active,
-    /// helping users understand why certain apps may be restricted.
-    private var blockingStatusBadge: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "lock.fill")
-                .font(.caption)
-            Text(String(localized: "Apps Blocked"))
-                .font(.subheadline)
-                .fontWeight(.medium)
-        }
-        .foregroundStyle(Color.onboardingButtonContent)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(Color.statusBlocked.gradient, in: Capsule())
-        .accessibilityIdentifier("blockingStatusBadge")
-    }
-
     /// Prominent banner alerting the user that one or both required permissions
     /// have been revoked. Delegates rendering to `PermissionsBannerView`.
     private var permissionsBanner: some View {

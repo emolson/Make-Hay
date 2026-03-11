@@ -34,6 +34,9 @@ extension Color {
     /// Surface / background colors for grouped card layouts.
     static var surfaceGrouped: Color { Color(uiColor: .systemGroupedBackground) }
     static var surfaceCard: Color { Color(uiColor: .secondarySystemGroupedBackground) }
+    /// Very subtle success-tinted surface applied to the dashboard when the user's goals are met.
+    /// **Why here?** Keeps the design system the single source of truth — views never own raw opacity formulas.
+    static var surfaceUnlocked: Color { statusSuccess.opacity(0.05) }
 
     /// Onboarding-specific semantic colors.
     static var onboardingWelcome: Color { .yellow }
