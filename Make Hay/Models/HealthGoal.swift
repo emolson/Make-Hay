@@ -449,82 +449,82 @@ enum ExerciseType: String, Codable, CaseIterable, Sendable, Identifiable {
     case archery
     case australianFootball
     case badminton
+    case barre
     case baseball
     case basketball
     case bowling
     case boxing
+    case cardioDance
     case climbing
+    case cooldown
+    case coreTraining
     case cricket
+    case crossCountrySkiing
     case crossTraining
     case curling
-    case walking
-    case running
     case cycling
+    case discSports
+    case downhillSkiing
     case elliptical
     case equestrianSports
     case fencing
     case fishing
+    case fitnessGaming
+    case flexibility
     case functionalStrengthTraining
     case golf
     case gymnastics
+    case handCycling
     case handball
+    case hiit
     case hiking
     case hockey
     case hunting
+    case jumpRope
+    case kickboxing
     case lacrosse
     case martialArts
     case mindAndBody
+    case mixedCardio
     case paddleSports
+    case pickleball
+    case pilates
     case play
     case preparationAndRecovery
     case racquetball
     case rowing
     case rugby
+    case running
     case sailing
     case skatingSports
     case snowSports
+    case snowboarding
     case soccer
+    case socialDance
     case softball
     case squash
     case stairClimbing
+    case stairs
+    case stepTraining
+    case strengthTraining
     case surfingSports
+    case swimBikeRun
     case swimming
     case tableTennis
+    case taiChi
     case tennis
     case trackAndField
+    case transition
+    case underwaterDiving
     case volleyball
+    case walking
     case waterFitness
     case waterPolo
     case waterSports
+    case wheelchairRunPace
+    case wheelchairWalkPace
     case wrestling
     case yoga
-    case barre
-    case coreTraining
-    case crossCountrySkiing
-    case downhillSkiing
-    case flexibility
-    case hiit
-    case jumpRope
-    case kickboxing
-    case pilates
-    case snowboarding
-    case stairs
-    case stepTraining
-    case wheelchairWalkPace
-    case wheelchairRunPace
-    case strengthTraining
-    case taiChi
-    case mixedCardio
-    case handCycling
-    case discSports
-    case fitnessGaming
-    case cardioDance
-    case socialDance
-    case pickleball
-    case cooldown
-    case swimBikeRun
-    case transition
-    case underwaterDiving
     case other
 
     // **Why no manual `allCases`?** Swift's automatic `CaseIterable` synthesis
@@ -541,108 +541,87 @@ enum ExerciseType: String, Codable, CaseIterable, Sendable, Identifiable {
     
     var iconName: String {
         switch self {
-        case .any:
-            return "figure.mixed.cardio"
-        case .americanFootball, .australianFootball, .rugby:
-            return "football.fill"
-        case .archery, .hunting:
-            return "target"
-        case .badminton, .handball, .lacrosse, .racquetball, .squash, .tableTennis, .tennis, .pickleball:
-            return "tennis.racket"
-        case .baseball, .softball:
-            return "baseball.fill"
-        case .basketball:
-            return "basketball.fill"
-        case .bowling:
-            return "figure.bowling"
-        case .boxing, .kickboxing, .martialArts, .wrestling:
-            return "figure.mixed.cardio"
-        case .climbing:
-            return "figure.climbing"
-        case .cricket:
-            return "sportscourt.fill"
-        case .crossTraining, .mixedCardio:
-            return "figure.mixed.cardio"
-        case .curling, .skatingSports, .snowSports, .crossCountrySkiing, .downhillSkiing, .snowboarding:
-            return "snowflake"
-        case .walking:
-            return "figure.walk"
-        case .running:
-            return "figure.run"
-        case .cycling:
-            return "figure.outdoor.cycle"
-        case .elliptical:
-            return "figure.elliptical"
-        case .equestrianSports:
-            return "figure.mixed.cardio"
-        case .fencing:
-            return "sportscourt.fill"
-        case .fishing:
-            return "fish.fill"
-        case .hiking:
-            return "figure.hiking"
-        case .golf:
-            return "figure.golf"
-        case .gymnastics:
-            return "figure.mixed.cardio"
-        case .hockey:
-            return "hockey.puck.fill"
-        case .mindAndBody, .yoga, .pilates, .taiChi, .flexibility:
-            return "figure.yoga"
-        case .paddleSports, .waterSports:
-            return "figure.open.water.swim"
-        case .play:
-            return "figure.play"
-        case .preparationAndRecovery, .cooldown:
-            return "figure.cooldown"
-        case .rowing:
-            return "figure.rower"
-        case .sailing:
-            return "sailboat.fill"
-        case .soccer:
-            return "soccerball"
-        case .stairClimbing, .stairs, .stepTraining:
-            return "figure.stair.stepper"
-        case .surfingSports:
-            return "figure.surfing"
-        case .swimming, .underwaterDiving:
-            return "figure.pool.swim"
-        case .trackAndField:
-            return "figure.run"
-        case .volleyball:
-            return "volleyball.fill"
-        case .waterFitness:
-            return "drop.fill"
-        case .waterPolo:
-            return "water.waves"
-        case .barre, .cardioDance, .socialDance:
-            return "figure.dance"
-        case .coreTraining:
-            return "figure.core.training"
-        case .hiit:
-            return "figure.highintensity.intervaltraining"
-        case .jumpRope:
-            return "figure.jumprope"
-        case .strengthTraining, .functionalStrengthTraining:
-            return "dumbbell.fill"
-        case .wheelchairWalkPace, .wheelchairRunPace:
-            return "figure.roll"
-        case .handCycling:
-            return "figure.hand.cycling"
-        case .discSports:
-            return "sportscourt.fill"
-        case .fitnessGaming:
-            return "gamecontroller.fill"
-        case .swimBikeRun, .transition:
-            return "figure.mixed.cardio"
-        case .other:
-            return "figure.mixed.cardio"
+case .any: return "figure.mixed.cardio"
+        case .americanFootball: return "figure.american.football"
+        case .archery: return "figure.archery"
+        case .australianFootball: return "figure.australian.football"
+        case .badminton: return "figure.badminton"
+        case .barre: return "figure.barre"
+        case .baseball: return "figure.baseball"
+        case .basketball: return "figure.basketball"
+        case .bowling: return "figure.bowling"
+        case .boxing: return "figure.boxing"
+        case .cardioDance: return "figure.dance"
+        case .climbing: return "figure.climbing"
+        case .coreTraining: return "figure.core.training"
+        case .cricket: return "figure.cricket"
+        case .crossCountrySkiing: return "figure.skiing.crosscountry"
+        case .crossTraining: return "figure.strengthtraining.functional"
+        case .curling: return "figure.curling"
+        case .cycling: return "figure.outdoor.cycle"
+        case .discSports: return "figure.disc.sports"
+        case .downhillSkiing: return "figure.skiing.downhill"
+        case .elliptical: return "figure.elliptical"
+        case .equestrianSports: return "figure.equestrian.sports"
+        case .fencing: return "figure.fencing"
+        case .fishing: return "figure.fishing"
+        case .fitnessGaming: return "gamecontroller.fill"
+        case .flexibility: return "figure.flexibility"
+        case .functionalStrengthTraining: return "figure.strengthtraining.functional"
+        case .golf: return "figure.golf"
+        case .gymnastics: return "figure.gymnastics"
+        case .handball: return "figure.handball"
+        case .handCycling: return "figure.hand.cycling"
+        case .hiit: return "figure.highintensity.intervaltraining"
+        case .hiking: return "figure.hiking"
+        case .hockey: return "figure.hockey"
+        case .hunting: return "figure.hunting"
+        case .jumpRope: return "figure.jumprope"
+        case .kickboxing: return "figure.kickboxing"
+        case .lacrosse: return "figure.lacrosse"
+        case .martialArts: return "figure.martial.arts"
+        case .mindAndBody, .yoga: return "figure.yoga"
+        case .mixedCardio: return "figure.mixed.cardio"
+        case .paddleSports, .waterSports: return "figure.open.water.swim"
+        case .pickleball: return "figure.pickleball"
+        case .pilates: return "figure.pilates"
+        case .play: return "figure.play"
+        case .preparationAndRecovery, .cooldown: return "figure.cooldown"
+        case .racquetball: return "figure.racquetball"
+        case .rowing: return "figure.rower"
+        case .rugby: return "figure.rugby"
+        case .running: return "figure.run"
+        case .sailing: return "figure.sailing"
+        case .skatingSports: return "figure.skating"
+        case .snowboarding: return "figure.snowboarding"
+        case .snowSports: return "snowflake"
+        case .soccer: return "figure.soccer"
+        case .socialDance: return "figure.socialdance"
+        case .softball: return "figure.softball"
+        case .squash: return "figure.squash"
+        case .stairClimbing, .stairs: return "figure.stair.stepper"
+        case .stepTraining: return "figure.step.training"
+        case .strengthTraining: return "figure.strengthtraining.traditional"
+        case .surfingSports: return "figure.surfing"
+        case .swimBikeRun, .transition: return "figure.mixed.cardio"
+        case .swimming, .underwaterDiving: return "figure.pool.swim"
+        case .tableTennis: return "figure.table.tennis"
+        case .taiChi: return "figure.taichi"
+        case .tennis: return "figure.tennis"
+        case .trackAndField: return "figure.track.and.field"
+        case .volleyball: return "figure.volleyball"
+        case .walking: return "figure.walk"
+        case .waterFitness: return "figure.water.fitness"
+        case .waterPolo: return "figure.waterpolo"
+        case .wheelchairWalkPace, .wheelchairRunPace: return "figure.roll"
+        case .wrestling: return "figure.wrestling"
+        case .other: return "figure.mixed.cardio"
         }
     }
     
     nonisolated var hkWorkoutActivityType: HKWorkoutActivityType? {
         switch self {
-        case .any:
+case .any:
             return nil
         case .americanFootball:
             return .americanFootball
@@ -652,6 +631,8 @@ enum ExerciseType: String, Codable, CaseIterable, Sendable, Identifiable {
             return .australianFootball
         case .badminton:
             return .badminton
+        case .barre:
+            return .barre
         case .baseball:
             return .baseball
         case .basketball:
@@ -660,20 +641,28 @@ enum ExerciseType: String, Codable, CaseIterable, Sendable, Identifiable {
             return .bowling
         case .boxing:
             return .boxing
+        case .cardioDance:
+            return .cardioDance
         case .climbing:
             return .climbing
+        case .cooldown:
+            return .cooldown
+        case .coreTraining:
+            return .coreTraining
         case .cricket:
             return .cricket
+        case .crossCountrySkiing:
+            return .crossCountrySkiing
         case .crossTraining:
             return .crossTraining
         case .curling:
             return .curling
-        case .walking:
-            return .walking
-        case .running:
-            return .running
         case .cycling:
             return .cycling
+        case .discSports:
+            return .discSports
+        case .downhillSkiing:
+            return .downhillSkiing
         case .elliptical:
             return .elliptical
         case .equestrianSports:
@@ -682,6 +671,10 @@ enum ExerciseType: String, Codable, CaseIterable, Sendable, Identifiable {
             return .fencing
         case .fishing:
             return .fishing
+        case .fitnessGaming:
+            return .fitnessGaming
+        case .flexibility:
+            return .flexibility
         case .functionalStrengthTraining:
             return .functionalStrengthTraining
         case .golf:
@@ -690,20 +683,34 @@ enum ExerciseType: String, Codable, CaseIterable, Sendable, Identifiable {
             return .gymnastics
         case .handball:
             return .handball
+        case .handCycling:
+            return .handCycling
+        case .hiit:
+            return .highIntensityIntervalTraining
         case .hiking:
             return .hiking
         case .hockey:
             return .hockey
         case .hunting:
             return .hunting
+        case .jumpRope:
+            return .jumpRope
+        case .kickboxing:
+            return .kickboxing
         case .lacrosse:
             return .lacrosse
         case .martialArts:
             return .martialArts
         case .mindAndBody:
             return .mindAndBody
+        case .mixedCardio:
+            return .mixedCardio
         case .paddleSports:
             return .paddleSports
+        case .pickleball:
+            return .pickleball
+        case .pilates:
+            return .pilates
         case .play:
             return .play
         case .preparationAndRecovery:
@@ -714,96 +721,68 @@ enum ExerciseType: String, Codable, CaseIterable, Sendable, Identifiable {
             return .rowing
         case .rugby:
             return .rugby
+        case .running:
+            return .running
         case .sailing:
             return .sailing
         case .skatingSports:
             return .skatingSports
+        case .snowboarding:
+            return .snowboarding
         case .snowSports:
             return .snowSports
         case .soccer:
             return .soccer
+        case .socialDance:
+            return .socialDance
         case .softball:
             return .softball
         case .squash:
             return .squash
         case .stairClimbing:
             return .stairClimbing
+        case .stairs:
+            return .stairs
+        case .stepTraining:
+            return .stepTraining
+        case .strengthTraining:
+            return .traditionalStrengthTraining
         case .surfingSports:
             return .surfingSports
+        case .swimBikeRun:
+            return .swimBikeRun
         case .swimming:
             return .swimming
         case .tableTennis:
             return .tableTennis
+        case .taiChi:
+            return .taiChi
         case .tennis:
             return .tennis
         case .trackAndField:
             return .trackAndField
+        case .transition:
+            return .transition
+        case .underwaterDiving:
+            return .underwaterDiving
         case .volleyball:
             return .volleyball
+        case .walking:
+            return .walking
         case .waterFitness:
             return .waterFitness
         case .waterPolo:
             return .waterPolo
         case .waterSports:
             return .waterSports
+        case .wheelchairRunPace:
+            return .wheelchairRunPace
+        case .wheelchairWalkPace:
+            return .wheelchairWalkPace
         case .wrestling:
             return .wrestling
         case .yoga:
             return .yoga
-        case .barre:
-            return .barre
-        case .coreTraining:
-            return .coreTraining
-        case .crossCountrySkiing:
-            return .crossCountrySkiing
-        case .downhillSkiing:
-            return .downhillSkiing
-        case .flexibility:
-            return .flexibility
-        case .hiit:
-            return .highIntensityIntervalTraining
-        case .jumpRope:
-            return .jumpRope
-        case .kickboxing:
-            return .kickboxing
-        case .pilates:
-            return .pilates
-        case .snowboarding:
-            return .snowboarding
-        case .stairs:
-            return .stairs
-        case .stepTraining:
-            return .stepTraining
-        case .wheelchairWalkPace:
-            return .wheelchairWalkPace
-        case .wheelchairRunPace:
-            return .wheelchairRunPace
-        case .strengthTraining:
-            return .traditionalStrengthTraining
-        case .taiChi:
-            return .taiChi
-        case .mixedCardio:
-            return .mixedCardio
-        case .handCycling:
-            return .handCycling
-        case .discSports:
-            return .discSports
-        case .fitnessGaming:
-            return .fitnessGaming
-        case .cardioDance:
-            return .cardioDance
-        case .socialDance:
-            return .socialDance
-        case .pickleball:
-            return .pickleball
-        case .cooldown:
-            return .cooldown
-        case .swimBikeRun:
-            return .swimBikeRun
-        case .transition:
-            return .transition
-        case .underwaterDiving:
-            return .underwaterDiving
         case .other:
             return .other
         }
@@ -815,82 +794,82 @@ enum ExerciseType: String, Codable, CaseIterable, Sendable, Identifiable {
         .archery: String(localized: "Archery"),
         .australianFootball: String(localized: "Australian Football"),
         .badminton: String(localized: "Badminton"),
+        .barre: String(localized: "Barre"),
         .baseball: String(localized: "Baseball"),
         .basketball: String(localized: "Basketball"),
         .bowling: String(localized: "Bowling"),
         .boxing: String(localized: "Boxing"),
+        .cardioDance: String(localized: "Cardio Dance"),
         .climbing: String(localized: "Climbing"),
+        .cooldown: String(localized: "Cooldown"),
+        .coreTraining: String(localized: "Core Training"),
         .cricket: String(localized: "Cricket"),
+        .crossCountrySkiing: String(localized: "Cross Country Skiing"),
         .crossTraining: String(localized: "Cross Training"),
         .curling: String(localized: "Curling"),
-        .walking: String(localized: "Walking"),
-        .running: String(localized: "Running"),
         .cycling: String(localized: "Cycling"),
+        .discSports: String(localized: "Disc Sports"),
+        .downhillSkiing: String(localized: "Downhill Skiing"),
         .elliptical: String(localized: "Elliptical"),
         .equestrianSports: String(localized: "Equestrian"),
         .fencing: String(localized: "Fencing"),
         .fishing: String(localized: "Fishing"),
+        .fitnessGaming: String(localized: "Fitness Gaming"),
+        .flexibility: String(localized: "Flexibility"),
         .functionalStrengthTraining: String(localized: "Functional Strength"),
         .golf: String(localized: "Golf"),
         .gymnastics: String(localized: "Gymnastics"),
         .handball: String(localized: "Handball"),
+        .handCycling: String(localized: "Hand Cycling"),
+        .hiit: String(localized: "HIIT"),
         .hiking: String(localized: "Hiking"),
         .hockey: String(localized: "Hockey"),
         .hunting: String(localized: "Hunting"),
+        .jumpRope: String(localized: "Jump Rope"),
+        .kickboxing: String(localized: "Kickboxing"),
         .lacrosse: String(localized: "Lacrosse"),
         .martialArts: String(localized: "Martial Arts"),
         .mindAndBody: String(localized: "Mind and Body"),
+        .mixedCardio: String(localized: "Mixed Cardio"),
         .paddleSports: String(localized: "Paddle Sports"),
+        .pickleball: String(localized: "Pickleball"),
+        .pilates: String(localized: "Pilates"),
         .play: String(localized: "Play"),
         .preparationAndRecovery: String(localized: "Preparation and Recovery"),
         .racquetball: String(localized: "Racquetball"),
         .rowing: String(localized: "Rowing"),
         .rugby: String(localized: "Rugby"),
+        .running: String(localized: "Running"),
         .sailing: String(localized: "Sailing"),
         .skatingSports: String(localized: "Skating"),
+        .snowboarding: String(localized: "Snowboarding"),
         .snowSports: String(localized: "Snow Sports"),
         .soccer: String(localized: "Soccer"),
+        .socialDance: String(localized: "Social Dance"),
         .softball: String(localized: "Softball"),
         .squash: String(localized: "Squash"),
         .stairClimbing: String(localized: "Stair Climbing"),
+        .stairs: String(localized: "Stairs"),
+        .stepTraining: String(localized: "Step Training"),
+        .strengthTraining: String(localized: "Strength"),
         .surfingSports: String(localized: "Surfing"),
+        .swimBikeRun: String(localized: "Swim Bike Run"),
         .swimming: String(localized: "Swimming"),
         .tableTennis: String(localized: "Table Tennis"),
+        .taiChi: String(localized: "Tai Chi"),
         .tennis: String(localized: "Tennis"),
         .trackAndField: String(localized: "Track and Field"),
+        .transition: String(localized: "Transition"),
+        .underwaterDiving: String(localized: "Underwater Diving"),
         .volleyball: String(localized: "Volleyball"),
+        .walking: String(localized: "Walking"),
         .waterFitness: String(localized: "Water Fitness"),
         .waterPolo: String(localized: "Water Polo"),
         .waterSports: String(localized: "Water Sports"),
+        .wheelchairRunPace: String(localized: "Wheelchair Run Pace"),
+        .wheelchairWalkPace: String(localized: "Wheelchair Walk Pace"),
         .wrestling: String(localized: "Wrestling"),
         .yoga: String(localized: "Yoga"),
-        .barre: String(localized: "Barre"),
-        .coreTraining: String(localized: "Core Training"),
-        .crossCountrySkiing: String(localized: "Cross Country Skiing"),
-        .downhillSkiing: String(localized: "Downhill Skiing"),
-        .flexibility: String(localized: "Flexibility"),
-        .hiit: String(localized: "HIIT"),
-        .jumpRope: String(localized: "Jump Rope"),
-        .kickboxing: String(localized: "Kickboxing"),
-        .pilates: String(localized: "Pilates"),
-        .snowboarding: String(localized: "Snowboarding"),
-        .stairs: String(localized: "Stairs"),
-        .stepTraining: String(localized: "Step Training"),
-        .wheelchairWalkPace: String(localized: "Wheelchair Walk Pace"),
-        .wheelchairRunPace: String(localized: "Wheelchair Run Pace"),
-        .strengthTraining: String(localized: "Strength"),
-        .taiChi: String(localized: "Tai Chi"),
-        .mixedCardio: String(localized: "Mixed Cardio"),
-        .handCycling: String(localized: "Hand Cycling"),
-        .discSports: String(localized: "Disc Sports"),
-        .fitnessGaming: String(localized: "Fitness Gaming"),
-        .cardioDance: String(localized: "Cardio Dance"),
-        .socialDance: String(localized: "Social Dance"),
-        .pickleball: String(localized: "Pickleball"),
-        .cooldown: String(localized: "Cooldown"),
-        .swimBikeRun: String(localized: "Swim Bike Run"),
-        .transition: String(localized: "Transition"),
-        .underwaterDiving: String(localized: "Underwater Diving"),
         .other: String(localized: "Other")
     ]
 }
