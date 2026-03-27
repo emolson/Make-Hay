@@ -51,7 +51,7 @@ private struct PermissionManagerKey: EnvironmentKey {
 /// Environment key for the shared `DashboardViewModel`.
 ///
 /// **Why the concrete type instead of its protocols?** `DashboardViewModel` conforms to
-/// both `GoalStatusProvider` and `ScheduleGoalManaging`. Injecting a single concrete
+/// `GoalStatusProvider`. Injecting a single concrete
 /// instance avoids needing separate mock classes for each protocol facet. Views that
 /// only need one protocol facet simply access it through the VM.
 ///

@@ -15,8 +15,7 @@ final class MakeHayDeviceActivityMonitor: DeviceActivityMonitor {
     override func intervalDidStart(for activity: DeviceActivityName) {
         super.intervalDidStart(for: activity)
 
-        // Match any per-weekday schedule name (makeHay.timeUnlock.1 … .7)
-        if DeviceActivityName.allWeekdayUnlocks.contains(activity) {
+        if activity == .makeHayTimeUnlock {
             store.clearAllSettings()
         }
     }

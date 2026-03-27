@@ -17,15 +17,15 @@ import Foundation
 /// a plain `actor` (would require `nonisolated` on every method, defeating the purpose).
 @MainActor
 final class MockTimeUnlockScheduler: TimeUnlockScheduling, Sendable {
-    private(set) var scheduledWeeklyEntries: [WeekdayUnlockEntry] = []
-    private(set) var cancelWeeklyCallCount: Int = 0
+    private(set) var scheduledUnlockMinutes: Int?
+    private(set) var cancelCallCount: Int = 0
 
-    func scheduleWeeklyUnlocks(_ entries: [WeekdayUnlockEntry]) throws {
-        scheduledWeeklyEntries = entries
+    func scheduleUnlock(unlockMinutes: Int) throws {
+        scheduledUnlockMinutes = unlockMinutes
     }
 
-    func cancelWeeklyUnlocks() {
-        cancelWeeklyCallCount += 1
-        scheduledWeeklyEntries = []
+    func cancelUnlock() {
+        cancelCallCount += 1
+        scheduledUnlockMinutes = nil
     }
 }

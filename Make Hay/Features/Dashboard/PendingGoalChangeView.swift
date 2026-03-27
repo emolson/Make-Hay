@@ -9,9 +9,8 @@ import SwiftUI
 
 /// Context describing which guarded change flow is being confirmed.
 enum PendingChangeContext {
-    /// A goal is being made easier. The associated `targetDayName` is the full weekday
-    /// name (e.g. "Monday") so the UI can say "Schedule for next Monday".
-    case goalChange(targetDayName: String? = nil)
+    /// A goal is being made easier — change deferred to tomorrow.
+    case goalChange
     case blockedAppsChange
 
     var navigationTitle: String {
@@ -34,10 +33,7 @@ enum PendingChangeContext {
 
     var message: String {
         switch self {
-        case .goalChange(let dayName):
-            if let dayName {
-                return String(localized: "You are lowering your target. To preserve your momentum, this change will take effect next \(dayName).")
-            }
+        case .goalChange:
             return String(localized: "You are lowering your target. To preserve your momentum, this change will take effect tomorrow morning.")
         case .blockedAppsChange:
             return String(localized: "Your goals are not met yet. To preserve your commitment, blocked-app changes will take effect tomorrow morning.")
@@ -46,12 +42,10 @@ enum PendingChangeContext {
 
     var bulletPoints: [String] {
         switch self {
-        case .goalChange(let dayName):
-            let effectLabel = dayName.map { String(localized: "New target starts next \($0)") }
-                ?? String(localized: "New target starts tomorrow at midnight")
+        case .goalChange:
             return [
                 String(localized: "Today's target remains unchanged"),
-                effectLabel,
+                String(localized: "New target starts tomorrow at midnight"),
                 String(localized: "Your progress streak continues")
             ]
         case .blockedAppsChange:
@@ -66,10 +60,7 @@ enum PendingChangeContext {
     /// Button label for the primary (schedule) action.
     var scheduleButtonLabel: String {
         switch self {
-        case .goalChange(let dayName):
-            if let dayName {
-                return String(localized: "Schedule for Next \(dayName)")
-            }
+        case .goalChange:
             return String(localized: "Schedule for Tomorrow")
         case .blockedAppsChange:
             return String(localized: "Schedule for Tomorrow")
@@ -216,7 +207,7 @@ struct PendingGoalChangeView: View {
 // MARK: - Preview
 
 #Preview {
-    PendingGoalChangeView(context: .goalChange()) {
+    PendingGoalChangeView(context: .goalChange) {
         print("Scheduled for tomorrow")
     } onEmergencyUnlock: {
         print("Emergency unlock confirmed")

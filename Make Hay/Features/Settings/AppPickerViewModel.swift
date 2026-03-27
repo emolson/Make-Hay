@@ -198,7 +198,7 @@ final class AppPickerViewModel {
     /// **Policy:** Always prefer fresh health reads for gate decisions. If fresh
     /// fetch fails, default to deferred mode to avoid accidental bypass.
     private func shouldDeferEdit() async -> Bool {
-        let latestGoal = WeeklyGoalSchedule.load().todayGoal()
+        let latestGoal = HealthGoal.load()
         return await GoalGatekeeper.shouldDeferEdits(
             goal: latestGoal,
             healthService: healthService

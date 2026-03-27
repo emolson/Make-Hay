@@ -107,6 +107,27 @@ struct HealthGoal: Codable, Sendable, Equatable {
         try container.encodeIfPresent(pendingGoal, forKey: .pendingGoal)
         try container.encodeIfPresent(pendingGoalEffectiveDate, forKey: .pendingGoalEffectiveDate)
     }
+
+    // MARK: - Persistence
+
+    nonisolated static let storageKey: String = "healthGoalData"
+
+    /// Loads the health goal from App Group `UserDefaults`.
+    nonisolated static func load(from defaults: UserDefaults = SharedStorage.appGroupDefaults) -> HealthGoal {
+        if let dataString = defaults.string(forKey: storageKey),
+           let data = dataString.data(using: .utf8),
+           let goal = try? JSONDecoder().decode(HealthGoal.self, from: data) {
+            return goal
+        }
+        return HealthGoal()
+    }
+
+    /// Saves the health goal to App Group `UserDefaults`.
+    nonisolated static func save(_ goal: HealthGoal, to defaults: UserDefaults = SharedStorage.appGroupDefaults) {
+        guard let data = try? JSONEncoder().encode(goal),
+              let encoded = String(data: data, encoding: .utf8) else { return }
+        defaults.set(encoded, forKey: storageKey)
+    }
 }
 
 /// Snapshot of a goal change scheduled to apply later.

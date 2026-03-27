@@ -46,9 +46,6 @@ struct DashboardView: View {
     
     /// Tracks the goal currently being edited (nil when not editing).
     @State private var editingGoal: GoalProgress?
-
-    /// Controls presentation of the weekly schedule sheet.
-    @State private var isShowingSchedule: Bool = false
     
     // MARK: - Body
     
@@ -62,17 +59,6 @@ struct DashboardView: View {
                         : Color.surfaceGrouped.ignoresSafeArea()
                 )
                 .animation(.easeInOut(duration: 1.0), value: viewModel.isGoalMet)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            isShowingSchedule = true
-                        } label: {
-                            Image(systemName: "calendar")
-                        }
-                        .accessibilityIdentifier("weeklyScheduleButton")
-                        .accessibilityLabel(String(localized: "Weekly Schedule"))
-                    }
-                }
                 .sheet(isPresented: Binding(
                     get: { viewModel.isShowingAddGoal },
                     set: { viewModel.isShowingAddGoal = $0 }
@@ -81,13 +67,6 @@ struct DashboardView: View {
                 }
                 .sheet(item: $editingGoal) { goal in
                     editGoalSheet(for: goal)
-                }
-                .sheet(isPresented: $isShowingSchedule) {
-                    WeeklyScheduleView(
-                        viewModel: WeeklyScheduleViewModel(
-                            dashboardViewModel: viewModel
-                        )
-                    )
                 }
                 .task {
                     await permissionManager.refresh()

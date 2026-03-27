@@ -192,8 +192,8 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
     /// (e.g., system pressure, daemon restart), and also prevents blocking apps that were
     /// already unblocked due to a transient error.
     private func evaluateAndUpdateShields() async {
-        // Load today's goal from the canonical weekly schedule.
-        let goal = WeeklyGoalSchedule.load().todayGoal()
+        // Load the goal configuration.
+        let goal = HealthGoal.load()
 
         // Bail early if no goals are configured — nothing to evaluate.
         let hasGoals = GoalBlockingEvaluator.hasEnabledGoals(goal: goal)

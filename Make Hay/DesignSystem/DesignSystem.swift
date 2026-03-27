@@ -64,34 +64,4 @@ extension Date {
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: date) ?? date
         return calendar.startOfDay(for: tomorrow)
     }
-
-    /// Returns the next midnight at which the given weekday occurs.
-    ///
-    /// If `weekday` matches the current day, returns midnight 7 days from now (i.e. next
-    /// week's same day) so that a pending change on the current day always defers forward.
-    ///
-    /// **Why 7 days for today?** Edits to today's schedule that make it easier should not
-    /// take effect until the *next* occurrence of that day (one week later), matching the
-    /// existing "Next-Day Effect" philosophy extended to the weekly model.
-    ///
-    /// - Parameters:
-    ///   - weekday: A `Calendar.weekday` value (1 = Sunday … 7 = Saturday).
-    ///   - date: The reference date (defaults to now).
-    ///   - calendar: The calendar to use (defaults to `.current`).
-    /// - Returns: The `Date` representing midnight of the next occurrence of `weekday`.
-    static func nextOccurrence(
-        of weekday: Int,
-        after date: Date = Date(),
-        calendar: Calendar = .current
-    ) -> Date {
-        let todayWeekday = calendar.component(.weekday, from: date)
-        let daysUntil: Int
-        if weekday == todayWeekday {
-            daysUntil = 7
-        } else {
-            daysUntil = (weekday - todayWeekday + 7) % 7
-        }
-        let target = calendar.date(byAdding: .day, value: daysUntil, to: date) ?? date
-        return calendar.startOfDay(for: target)
-    }
 }

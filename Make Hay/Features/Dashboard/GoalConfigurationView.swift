@@ -48,21 +48,10 @@ struct GoalConfigurationView: View {
     
     // MARK: - State
     
-    /// Non-owned reference to the shared goal manager.
-    /// **Why `let` instead of `@State`?** This view does not own the ViewModel — it is
-    /// created by `DashboardView` and passed in. Using `@State` for a non-owned
-    /// `@Observable` reference can cause lifecycle issues where the first `Task`
-    /// capture receives a stale wrapper, bypassing the gate on initial presentation.
-    let viewModel: any ScheduleGoalManaging
+    /// Non-owned reference to the shared ViewModel.
+    let viewModel: DashboardViewModel
     let goalType: GoalType
     let mode: GoalConfigurationMode
-
-    /// The weekday (1–7) this configuration targets.
-    /// Defaults to `todayWeekday` for Dashboard edits; set explicitly for schedule edits.
-    ///
-    /// **Why a stored property?** Future-day edits skip the deferral gate and route to
-    /// weekday-aware ViewModel methods, so the view needs to know which day it's editing.
-    let weekday: Int
     
     @State private var targetValue: Double
     @State private var selectedExerciseType: ExerciseType = .any
@@ -72,75 +61,52 @@ struct GoalConfigurationView: View {
     @State private var showingRemoveConfirmation: Bool = false
 
     /// Wrapper tying a proposed goal to `.sheet(item:)` presentation.
-    ///
-    /// **Why not separate `Bool` + `Optional`?** `.sheet(isPresented:)` can render
-    /// its content before a companion `@State` optional is set, causing a blank
-    /// sheet on first presentation. `.sheet(item:)` guarantees the data is
-    /// available when the sheet content closure runs.
     @State private var pendingProposal: PendingGoalProposal?
-
-    /// Whether this view is editing today's goal (and therefore subject to deferral rules).
-    private var isEditingToday: Bool { weekday == viewModel.todayWeekday }
     
     // MARK: - Initialization
     
-    /// Creates a GoalConfigurationView for adding a new goal (today).
+    /// Creates a GoalConfigurationView for adding a new goal.
     /// Pre-fills with existing values if the goal was previously configured.
-    /// - Parameters:
-    ///   - viewModel: The ViewModel managing dashboard state.
-    ///   - goalType: The type of goal being configured.
-    init(viewModel: any ScheduleGoalManaging, goalType: GoalType) {
-        self.init(viewModel: viewModel, goalType: goalType, mode: .add, weekday: viewModel.todayWeekday)
+    init(viewModel: DashboardViewModel, goalType: GoalType) {
+        self.init(viewModel: viewModel, goalType: goalType, mode: .add)
     }
     
     /// Creates a GoalConfigurationView for adding or editing a goal.
-    /// - Parameters:
-    ///   - viewModel: The ViewModel managing dashboard state.
-    ///   - goalType: The type of goal being configured.
-    ///   - mode: Whether adding a new goal or editing an existing one.
-    ///   - exerciseGoal: The specific exercise goal being edited (for exercise goals only).
-    ///   - weekday: The weekday this edit targets (1–7). Defaults to today.
     init(
-        viewModel: any ScheduleGoalManaging,
+        viewModel: DashboardViewModel,
         goalType: GoalType,
         mode: GoalConfigurationMode,
-        exerciseGoal: ExerciseGoal? = nil,
-        weekday: Int? = nil
+        exerciseGoal: ExerciseGoal? = nil
     ) {
         self.viewModel = viewModel
         self.goalType = goalType
         self.mode = mode
-        self.weekday = weekday ?? viewModel.todayWeekday
 
-        // Resolve the goal for the target weekday (may differ from today)
-        let dayGoal = viewModel.weeklySchedule.goal(for: self.weekday)
+        let goal = viewModel.healthGoal
         
         // Initialize unlockTime with a default (only used for .timeUnlock goals)
-        let defaultUnlockTime = dayGoal.timeBlockGoal.unlockDate()
+        let defaultUnlockTime = goal.timeBlockGoal.unlockDate()
         _unlockTime = State(initialValue: defaultUnlockTime)
         
         // Pre-fill based on mode
         switch goalType {
         case .steps:
-            _targetValue = State(initialValue: Double(dayGoal.stepGoal.target))
+            _targetValue = State(initialValue: Double(goal.stepGoal.target))
         case .activeEnergy:
-            _targetValue = State(initialValue: Double(dayGoal.activeEnergyGoal.target))
+            _targetValue = State(initialValue: Double(goal.activeEnergyGoal.target))
         case .exercise:
             if let exerciseGoal {
-                // Editing a specific exercise goal
                 _targetValue = State(initialValue: Double(exerciseGoal.targetMinutes))
                 _selectedExerciseType = State(initialValue: exerciseGoal.exerciseType)
-            } else if let lastExerciseGoal = dayGoal.exerciseGoals.last {
-                // Adding new - use last exercise goal as template
+            } else if let lastExerciseGoal = goal.exerciseGoals.last {
                 _targetValue = State(initialValue: Double(lastExerciseGoal.targetMinutes))
                 _selectedExerciseType = State(initialValue: lastExerciseGoal.exerciseType)
             } else {
-                // Default for first exercise goal
                 _targetValue = State(initialValue: 30)
                 _selectedExerciseType = State(initialValue: .any)
             }
         case .timeUnlock:
-            _targetValue = State(initialValue: Double(dayGoal.timeBlockGoal.unlockTimeMinutes))
+            _targetValue = State(initialValue: Double(goal.timeBlockGoal.unlockTimeMinutes))
         }
     }
     
@@ -232,12 +198,9 @@ struct GoalConfigurationView: View {
         }
         .sheet(item: $pendingProposal) { proposal in
             PendingGoalChangeView(
-                context: .goalChange(
-                    targetDayName: WeeklyGoalSchedule.fullName(for: weekday)
-                )
+                context: .goalChange
             ) {
-                // Schedule for next occurrence of this weekday
-                viewModel.schedulePendingGoal(proposal.goal, forWeekday: weekday)
+                viewModel.schedulePendingGoal(proposal.goal)
                 dismiss()
             } onEmergencyUnlock: {
                 // Apply immediately via emergency unlock
@@ -356,9 +319,8 @@ struct GoalConfigurationView: View {
         isSaving = true
         
         Task {
-            // Build the proposed goal configuration from the target weekday's goal
-            let currentDayGoal = viewModel.weeklySchedule.goal(for: weekday)
-            var newGoal = currentDayGoal
+            let currentGoal = viewModel.healthGoal
+            var newGoal = currentGoal
             
             if mode.isEditing {
                 // Update existing goal
@@ -399,11 +361,10 @@ struct GoalConfigurationView: View {
             }
             
             // Determine the intent of this change
-            let intent = GoalChangeIntent.determine(original: currentDayGoal, proposed: newGoal)
+            let intent = GoalChangeIntent.determine(original: currentGoal, proposed: newGoal)
 
-            // Only defer edits when editing today — future days aren't actively blocking
             let shouldDefer: Bool
-            if isEditingToday && intent == .easier {
+            if intent == .easier {
                 shouldDefer = await viewModel.shouldDeferGoalEdits()
             } else {
                 shouldDefer = false
@@ -414,21 +375,18 @@ struct GoalConfigurationView: View {
                 pendingProposal = PendingGoalProposal(goal: newGoal)
                 isSaving = false
             } else {
-                // Apply immediately for harder goals, future days, or when not blocking
                 if mode.isEditing {
                     await viewModel.updateGoal(
                         type: goalType,
                         target: targetValue,
                         exerciseGoalId: mode.exerciseGoalId,
-                        exerciseType: selectedExerciseType,
-                        forWeekday: weekday
+                        exerciseType: selectedExerciseType
                     )
                 } else {
                     await viewModel.addGoal(
                         type: goalType,
                         target: targetValue,
-                        exerciseType: selectedExerciseType,
-                        forWeekday: weekday
+                        exerciseType: selectedExerciseType
                     )
                 }
                 
@@ -446,9 +404,8 @@ struct GoalConfigurationView: View {
             isSaving = true
             defer { isSaving = false }
 
-            // Build the proposed goal configuration with the goal removed
-            let currentDayGoal = viewModel.weeklySchedule.goal(for: weekday)
-            var newGoal = currentDayGoal
+            let currentGoal = viewModel.healthGoal
+            var newGoal = currentGoal
             switch goalType {
             case .steps:
                 newGoal.stepGoal.isEnabled = false
@@ -463,24 +420,21 @@ struct GoalConfigurationView: View {
             }
             
             // Determine intent (removal is always "easier")
-            let intent = GoalChangeIntent.determine(original: currentDayGoal, proposed: newGoal)
+            let intent = GoalChangeIntent.determine(original: currentGoal, proposed: newGoal)
 
-            // Only defer when editing today
             let shouldDefer: Bool
-            if isEditingToday && intent == .easier {
+            if intent == .easier {
                 shouldDefer = await viewModel.shouldDeferGoalEdits()
             } else {
                 shouldDefer = false
             }
             
-            // If removing while blocked on today, schedule or require emergency override
             if shouldDefer {
                 pendingProposal = PendingGoalProposal(goal: newGoal)
             } else {
                 await viewModel.removeGoal(
                     type: goalType,
-                    exerciseGoalId: mode.exerciseGoalId,
-                    forWeekday: weekday
+                    exerciseGoalId: mode.exerciseGoalId
                 )
                 dismiss()
             }
