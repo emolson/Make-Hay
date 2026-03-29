@@ -8,6 +8,14 @@
 import SwiftUI
 import HealthKit
 
+/// Wraps a proposed `HealthGoal` for `.sheet(item:)` presentation.
+/// **Why not share `GoalConfigurationView.PendingGoalProposal`?** That type is
+/// `private` to its file. Duplicating the 4-line struct avoids cross-file coupling.
+private struct DashboardPendingGoalProposal: Identifiable {
+    let id = UUID()
+    let goal: HealthGoal
+}
+
 /// The main dashboard view showing the user's progress toward their health goal.
 /// Displays step count, loading state, and error handling with retry capability.
 ///
@@ -47,12 +55,29 @@ struct DashboardView: View {
     /// Tracks the goal currently being edited (nil when not editing).
     @State private var editingGoal: GoalProgress?
     
+    /// Tracks a removal that must be deferred (swipe-to-delete while blocked).
+    /// **Why separate from `editingGoal`?** Sheet destinations differ: edit opens
+    /// `GoalConfigurationView`, while deferred removal opens `PendingGoalChangeView`.
+    @State private var pendingRemovalProposal: DashboardPendingGoalProposal?
+    
     // MARK: - Body
     
     var body: some View {
         NavigationStack {
             content
                 .navigationTitle(String(localized: "Make Hay"))
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            viewModel.isShowingAddGoal = true
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                        .disabled(!viewModel.canAddMoreGoals)
+                        .accessibilityIdentifier("addGoalToolbarButton")
+                        .accessibilityLabel(String(localized: "Add Goal"))
+                    }
+                }
                 .background(
                     viewModel.isGoalMet
                         ? Color.surfaceUnlocked.ignoresSafeArea()
@@ -67,6 +92,17 @@ struct DashboardView: View {
                 }
                 .sheet(item: $editingGoal) { goal in
                     editGoalSheet(for: goal)
+                }
+                .sheet(item: $pendingRemovalProposal) { proposal in
+                    PendingGoalChangeView(
+                        context: .goalChange
+                    ) {
+                        viewModel.schedulePendingGoal(proposal.goal)
+                    } onEmergencyUnlock: {
+                        Task {
+                            await viewModel.applyEmergencyChange(proposal.goal)
+                        }
+                    }
                 }
                 .task {
                     await permissionManager.refresh()
@@ -134,35 +170,125 @@ struct DashboardView: View {
     }
     
     private var goalsView: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                // Permissions Banner — shown prominently above all other content
-                // when HealthKit or Screen Time access has been revoked.
-                if permissionManager.isPermissionMissing {
-                    permissionsBanner
+        List {
+            // Permissions Banner — shown prominently above all other content
+            // when HealthKit or Screen Time access has been revoked.
+            if permissionManager.isPermissionMissing {
+                permissionsBanner
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets())
+            }
+
+            // Banners Section
+            if viewModel.healthGoal.hasPendingChanges {
+                pendingChangeBanner
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets())
+            }
+
+            if viewModel.goalProgresses.isEmpty && viewModel.inactiveGoalProgresses.isEmpty {
+                emptyGoalsDisplay
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            } else {
+                // Active Goals Section — goals scheduled for today.
+                // Each row supports swipe-to-delete.
+                // **Why List instead of ScrollView?** SwiftUI's `.swipeActions`
+                // modifier only works inside `List`. Converting enables native
+                // swipe-to-delete with no custom gesture handling.
+                if !viewModel.goalProgresses.isEmpty {
+                    Section {
+                        ForEach(viewModel.goalProgresses) { goal in
+                            GoalProgressRowView(progress: goal) {
+                                editingGoal = goal
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button {
+                                    Task {
+                                        let decision = await viewModel.requestGoalRemoval(
+                                            type: goal.type,
+                                            exerciseGoalId: goal.exerciseGoalId
+                                        )
+                                        switch decision {
+                                        case .applyImmediately:
+                                            await viewModel.removeGoal(
+                                                type: goal.type,
+                                                exerciseGoalId: goal.exerciseGoalId
+                                            )
+                                        case .deferred(let proposedGoal):
+                                            pendingRemovalProposal = DashboardPendingGoalProposal(goal: proposedGoal)
+                                        }
+                                    }
+                                } label: {
+                                    Label(String(localized: "Delete"), systemImage: "trash")
+                                }
+                                .tint(.red)
+                                .accessibilityIdentifier("deleteGoalAction.\(goal.id)")
+                            }
+                        }
+                    } header: {
+                        Text(String(localized: "YOUR GOALS"))
+                    }
+                } else {
+                    // All goals exist but none are scheduled for today
+                    Section {
+                        HStack(spacing: 8) {
+                            Image(systemName: "moon.zzz")
+                                .foregroundStyle(.tertiary)
+                            Text(String(localized: "No goals scheduled for today"))
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 24)
+                    } header: {
+                        Text(String(localized: "YOUR GOALS"))
+                    }
                 }
 
-                // Banners Section
-                if viewModel.healthGoal.pendingGoal != nil {
-                    pendingChangeBanner
-                }
-                
-                if viewModel.goalProgresses.isEmpty {
-                    emptyGoalsDisplay
-                } else {
-                    // Goals Section
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(String(localized: "YOUR GOALS"))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 16)
-                        
-                        goalProgressRows
+                // Inactive Goals Section — enabled goals not scheduled for today.
+                // Shown dimmed below active goals so the user can still see and
+                // manage their full goal list.
+                if !viewModel.inactiveGoalProgresses.isEmpty {
+                    Section {
+                        ForEach(viewModel.inactiveGoalProgresses) { goal in
+                            GoalProgressRowView(progress: goal, isInactive: true) {
+                                editingGoal = goal
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button {
+                                    Task {
+                                        let decision = await viewModel.requestGoalRemoval(
+                                            type: goal.type,
+                                            exerciseGoalId: goal.exerciseGoalId
+                                        )
+                                        switch decision {
+                                        case .applyImmediately:
+                                            await viewModel.removeGoal(
+                                                type: goal.type,
+                                                exerciseGoalId: goal.exerciseGoalId
+                                            )
+                                        case .deferred(let proposedGoal):
+                                            pendingRemovalProposal = DashboardPendingGoalProposal(goal: proposedGoal)
+                                        }
+                                    }
+                                } label: {
+                                    Label(String(localized: "Delete"), systemImage: "trash")
+                                }
+                                .tint(.red)
+                                .accessibilityIdentifier("deleteGoalAction.\(goal.id)")
+                            }
+                        }
+                    } header: {
+                        Text(String(localized: "NOT SCHEDULED TODAY"))
                     }
                 }
             }
-            .padding(.vertical, 24)
         }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
         .refreshable {
             await viewModel.loadGoals()
         }
@@ -170,84 +296,44 @@ struct DashboardView: View {
     }
     
     /// Empty state prompting the user to add their first goal.
-    /// **Why keep the centered layout?** Maintains the existing friendly
-    /// onboarding feel without requiring the bar-based aesthetic.
+    /// **Why centered?** Provides a clean, focused starting point that avoids
+    /// cluttering the list while no goals are present.
     private var emptyGoalsDisplay: some View {
-        VStack(spacing: 12) {
-            Spacer()
-                .frame(height: 60)
-            
+        VStack(spacing: 16) {
             Image(systemName: "plus.circle.fill")
-                .font(.dashboardIcon)
+                .font(.system(size: 48))
                 .foregroundStyle(.tint)
                 .accessibilityIdentifier("emptyGoalsIcon")
             
-            Text(String(localized: "Add your first goal to start"))
-                .font(.title3)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("progressText")
+            VStack(spacing: 8) {
+                Text(String(localized: "No Goals Yet"))
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                
+                Text(String(localized: "Add a health goal to start unblocking your apps."))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 32)
             
             Button {
                 viewModel.isShowingAddGoal = true
             } label: {
-                Text(String(localized: "Get Started"))
+                Text(String(localized: "Add First Goal"))
                     .font(.headline)
-                    .frame(minWidth: 200)
+                    .frame(minWidth: 160)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
+            .padding(.top, 8)
             .accessibilityIdentifier("getStartedButton")
         }
-        .padding(.vertical)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 60)
     }
     
-    /// Vertically stacked linear progress bars, one per enabled goal, inside a grouped card.
-    /// **Why a card layout?** Groups related items visually, matching modern iOS Settings
-    /// and Health app aesthetics. The inline "Add Goal" button is more discoverable
-    /// and ergonomic than a top-right toolbar button.
-    private var goalProgressRows: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(viewModel.goalProgresses.enumerated()), id: \.element.id) { index, goal in
-                GoalProgressRowView(progress: goal) {
-                    editingGoal = goal
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                
-                if index < viewModel.goalProgresses.count - 1 || viewModel.canAddMoreGoals {
-                    Divider()
-                        .padding(.leading, 56) // Align with text, skipping icon
-                }
-            }
-            
-            if viewModel.canAddMoreGoals {
-                Button {
-                    viewModel.isShowingAddGoal = true
-                } label: {
-                    HStack(spacing: 16) {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.title2)
-                            .foregroundStyle(Color.statusSuccess)
-                            .frame(width: 24, height: 24)
-                        
-                        Text(String(localized: "Add Goal"))
-                            .font(.body)
-                            .foregroundStyle(.primary)
-                        
-                        Spacer()
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("inlineAddGoalButton")
-            }
-        }
-        .background(Color.surfaceCard)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal, 16)
-    }
+
     
     /// Banner shown when a goal change is scheduled for tomorrow.
     /// **Why show this?** Provides transparency about pending changes and allows cancellation.

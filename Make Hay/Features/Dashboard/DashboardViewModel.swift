@@ -73,6 +73,10 @@ struct GoalProgress: Identifiable, Sendable, Equatable {
     let exerciseGoalId: UUID?
     /// Optional exercise type label for display purposes.
     let exerciseType: ExerciseType?
+    /// The schedule for this goal, used to display a schedule label on the row.
+    let schedule: GoalSchedule
+    /// Whether this goal has a deferred edit that will take effect at midnight.
+    let hasPendingChange: Bool
     
     var id: String {
         if let exerciseGoalId {
@@ -149,15 +153,21 @@ final class DashboardViewModel: GoalStatusProvider {
     /// **Why this matters?** Prevents users from adding duplicate goals and provides
     /// a clean way to determine which options to show in the AddGoalView.
     /// **Note:** Exercise goals can be added multiple times.
+    /// **Why check the model directly?** `goalProgresses` only includes goals
+    /// scheduled for today, so an inactive-but-enabled goal would appear
+    /// "available" if we only checked the active list.
     var availableGoalTypes: [GoalType] {
         GoalType.allCases.filter { type in
             switch type {
+            case .steps:
+                return !healthGoal.stepGoal.isEnabled
+            case .activeEnergy:
+                return !healthGoal.activeEnergyGoal.isEnabled
             case .exercise:
                 // Always allow adding exercise goals (supports multiple)
                 return true
-            default:
-                // Other goal types can only exist once
-                return !goalProgresses.contains { $0.type == type }
+            case .timeUnlock:
+                return !healthGoal.timeBlockGoal.isEnabled
             }
         }
     }
@@ -167,11 +177,11 @@ final class DashboardViewModel: GoalStatusProvider {
         !availableGoalTypes.isEmpty
     }
     
-    /// Returns all enabled goal progress values, ordered for display.
+    /// Returns all enabled goal progress values scheduled for today, ordered for display.
     var goalProgresses: [GoalProgress] {
         var items: [GoalProgress] = []
         
-        if healthGoal.stepGoal.isEnabled {
+        if healthGoal.stepGoal.isEnabled && healthGoal.stepGoal.schedule.includestoday {
             let target = Double(max(healthGoal.stepGoal.target, 1))
             let current = Double(currentSteps)
             let progress = min(current / target, 1.0)
@@ -182,11 +192,13 @@ final class DashboardViewModel: GoalStatusProvider {
                 progress: progress,
                 isMet: currentSteps >= healthGoal.stepGoal.target,
                 exerciseGoalId: nil,
-                exerciseType: nil
+                exerciseType: nil,
+                schedule: healthGoal.stepGoal.schedule,
+                hasPendingChange: hasGoalPendingChange(type: .steps)
             ))
         }
         
-        if healthGoal.activeEnergyGoal.isEnabled {
+        if healthGoal.activeEnergyGoal.isEnabled && healthGoal.activeEnergyGoal.schedule.includestoday {
             let target = Double(max(healthGoal.activeEnergyGoal.target, 1))
             let progress = min(currentActiveEnergy / target, 1.0)
             items.append(GoalProgress(
@@ -196,12 +208,14 @@ final class DashboardViewModel: GoalStatusProvider {
                 progress: progress,
                 isMet: currentActiveEnergy >= Double(healthGoal.activeEnergyGoal.target),
                 exerciseGoalId: nil,
-                exerciseType: nil
+                exerciseType: nil,
+                schedule: healthGoal.activeEnergyGoal.schedule,
+                hasPendingChange: hasGoalPendingChange(type: .activeEnergy)
             ))
         }
         
-        // Add progress for each enabled exercise goal
-        for exerciseGoal in healthGoal.exerciseGoals where exerciseGoal.isEnabled {
+        // Add progress for each enabled exercise goal scheduled for today
+        for exerciseGoal in healthGoal.exerciseGoals where exerciseGoal.isEnabled && exerciseGoal.schedule.includestoday {
             let target = Double(max(exerciseGoal.targetMinutes, 1))
             let current = Double(currentExerciseMinutes[exerciseGoal.id] ?? 0)
             let progress = min(current / target, 1.0)
@@ -212,11 +226,13 @@ final class DashboardViewModel: GoalStatusProvider {
                 progress: progress,
                 isMet: current >= Double(exerciseGoal.targetMinutes),
                 exerciseGoalId: exerciseGoal.id,
-                exerciseType: exerciseGoal.exerciseType
+                exerciseType: exerciseGoal.exerciseType,
+                schedule: exerciseGoal.schedule,
+                hasPendingChange: hasGoalPendingChange(type: .exercise, exerciseGoalId: exerciseGoal.id)
             ))
         }
 
-        if healthGoal.timeBlockGoal.isEnabled {
+        if healthGoal.timeBlockGoal.isEnabled && healthGoal.timeBlockGoal.schedule.includestoday {
             // Read timeTick to create an @Observable dependency so SwiftUI
             // re-evaluates this property when the timer fires.
             _ = timeTick
@@ -232,10 +248,82 @@ final class DashboardViewModel: GoalStatusProvider {
                 progress: progress,
                 isMet: isMet,
                 exerciseGoalId: nil,
-                exerciseType: nil
+                exerciseType: nil,
+                schedule: healthGoal.timeBlockGoal.schedule,
+                hasPendingChange: hasGoalPendingChange(type: .timeUnlock)
             ))
         }
         
+        return items
+    }
+
+    /// Returns enabled goals that are NOT scheduled for today.
+    /// **Why separate from `goalProgresses`?** Inactive goals don't track live progress
+    /// or participate in blocking, but must still appear on the Dashboard (dimmed) so
+    /// the user can see and manage their full goal list.
+    var inactiveGoalProgresses: [GoalProgress] {
+        var items: [GoalProgress] = []
+
+        if healthGoal.stepGoal.isEnabled && !healthGoal.stepGoal.schedule.includestoday {
+            let target = Double(max(healthGoal.stepGoal.target, 1))
+            items.append(GoalProgress(
+                type: .steps,
+                current: 0,
+                target: target,
+                progress: 0,
+                isMet: false,
+                exerciseGoalId: nil,
+                exerciseType: nil,
+                schedule: healthGoal.stepGoal.schedule,
+                hasPendingChange: hasGoalPendingChange(type: .steps)
+            ))
+        }
+
+        if healthGoal.activeEnergyGoal.isEnabled && !healthGoal.activeEnergyGoal.schedule.includestoday {
+            let target = Double(max(healthGoal.activeEnergyGoal.target, 1))
+            items.append(GoalProgress(
+                type: .activeEnergy,
+                current: 0,
+                target: target,
+                progress: 0,
+                isMet: false,
+                exerciseGoalId: nil,
+                exerciseType: nil,
+                schedule: healthGoal.activeEnergyGoal.schedule,
+                hasPendingChange: hasGoalPendingChange(type: .activeEnergy)
+            ))
+        }
+
+        for exerciseGoal in healthGoal.exerciseGoals where exerciseGoal.isEnabled && !exerciseGoal.schedule.includestoday {
+            let target = Double(max(exerciseGoal.targetMinutes, 1))
+            items.append(GoalProgress(
+                type: .exercise,
+                current: 0,
+                target: target,
+                progress: 0,
+                isMet: false,
+                exerciseGoalId: exerciseGoal.id,
+                exerciseType: exerciseGoal.exerciseType,
+                schedule: exerciseGoal.schedule,
+                hasPendingChange: hasGoalPendingChange(type: .exercise, exerciseGoalId: exerciseGoal.id)
+            ))
+        }
+
+        if healthGoal.timeBlockGoal.isEnabled && !healthGoal.timeBlockGoal.schedule.includestoday {
+            let unlockMinutes = Double(max(healthGoal.timeBlockGoal.clampedUnlockMinutes, 1))
+            items.append(GoalProgress(
+                type: .timeUnlock,
+                current: 0,
+                target: unlockMinutes,
+                progress: 0,
+                isMet: false,
+                exerciseGoalId: nil,
+                exerciseType: nil,
+                schedule: healthGoal.timeBlockGoal.schedule,
+                hasPendingChange: hasGoalPendingChange(type: .timeUnlock)
+            ))
+        }
+
         return items
     }
     
@@ -386,24 +474,28 @@ final class DashboardViewModel: GoalStatusProvider {
     ///   - type: The type of goal to add.
     ///   - target: The target value for the goal.
     ///   - exerciseType: The exercise type (only used for exercise goals).
-    func addGoal(type: GoalType, target: Double, exerciseType: ExerciseType = .any) async {
+    func addGoal(type: GoalType, target: Double, exerciseType: ExerciseType = .any, schedule: GoalSchedule = .everyDay) async {
         switch type {
         case .steps:
             healthGoal.stepGoal.isEnabled = true
             healthGoal.stepGoal.target = Int(target)
+            healthGoal.stepGoal.schedule = schedule
         case .activeEnergy:
             healthGoal.activeEnergyGoal.isEnabled = true
             healthGoal.activeEnergyGoal.target = Int(target)
+            healthGoal.activeEnergyGoal.schedule = schedule
         case .exercise:
             let newExerciseGoal = ExerciseGoal(
                 isEnabled: true,
                 targetMinutes: Int(target),
-                exerciseType: exerciseType
+                exerciseType: exerciseType,
+                schedule: schedule
             )
             healthGoal.exerciseGoals.append(newExerciseGoal)
         case .timeUnlock:
             healthGoal.timeBlockGoal.isEnabled = true
             healthGoal.timeBlockGoal.unlockTimeMinutes = Int(target)
+            healthGoal.timeBlockGoal.schedule = schedule
         }
         
         saveGoal()
@@ -413,6 +505,48 @@ final class DashboardViewModel: GoalStatusProvider {
         await loadGoals()
     }
     
+    /// Result of a gated goal removal request.
+    /// **Why an enum?** The caller (DashboardView swipe action) needs to know
+    /// whether to proceed immediately or present the deferred-change sheet.
+    enum RemovalDecision: Sendable {
+        /// The goal can be removed right now (all goals met or change is non-easier).
+        case applyImmediately
+        /// The removal must be deferred — carries the proposed goal for scheduling.
+        case deferred(HealthGoal)
+    }
+
+    /// Gates a goal removal through the same anti-cheat flow as GoalConfigurationView.
+    /// **Why not call `removeGoal` directly?** Removing a goal while blocked is an
+    /// "easier" change that would let the user bypass app-blocking. This method
+    /// checks `GoalChangeIntent` and `shouldDeferGoalEdits()` first.
+    /// - Parameters:
+    ///   - type: The type of goal to remove.
+    ///   - exerciseGoalId: The ID of the exercise goal to remove (only for exercise goals).
+    /// - Returns: Whether the removal can proceed now or must be deferred.
+    func requestGoalRemoval(type: GoalType, exerciseGoalId: UUID? = nil) async -> RemovalDecision {
+        let currentGoal = healthGoal
+        var proposedGoal = currentGoal
+        switch type {
+        case .steps:
+            proposedGoal.stepGoal.isEnabled = false
+        case .activeEnergy:
+            proposedGoal.activeEnergyGoal.isEnabled = false
+        case .exercise:
+            if let exerciseGoalId {
+                proposedGoal.exerciseGoals.removeAll { $0.id == exerciseGoalId }
+            }
+        case .timeUnlock:
+            proposedGoal.timeBlockGoal.isEnabled = false
+        }
+
+        let intent = GoalChangeIntent.determine(original: currentGoal, proposed: proposedGoal)
+
+        if intent == .easier, await shouldDeferGoalEdits() {
+            return .deferred(proposedGoal)
+        }
+        return .applyImmediately
+    }
+
     /// Removes a goal of the specified type.
     /// **Why save and check status?** Removing a goal disables it in the model,
     /// persists the change, and recalculates whether apps should be blocked.
@@ -448,20 +582,24 @@ final class DashboardViewModel: GoalStatusProvider {
     ///   - target: The new target value for the goal.
     ///   - exerciseGoalId: The ID of the exercise goal to update (only used for exercise goals).
     ///   - exerciseType: The new exercise type (only used for exercise goals).
-    func updateGoal(type: GoalType, target: Double, exerciseGoalId: UUID? = nil, exerciseType: ExerciseType = .any) async {
+    func updateGoal(type: GoalType, target: Double, exerciseGoalId: UUID? = nil, exerciseType: ExerciseType = .any, schedule: GoalSchedule = .everyDay) async {
         switch type {
         case .steps:
             healthGoal.stepGoal.target = Int(target)
+            healthGoal.stepGoal.schedule = schedule
         case .activeEnergy:
             healthGoal.activeEnergyGoal.target = Int(target)
+            healthGoal.activeEnergyGoal.schedule = schedule
         case .exercise:
             if let exerciseGoalId,
                let index = healthGoal.exerciseGoals.firstIndex(where: { $0.id == exerciseGoalId }) {
                 healthGoal.exerciseGoals[index].targetMinutes = Int(target)
                 healthGoal.exerciseGoals[index].exerciseType = exerciseType
+                healthGoal.exerciseGoals[index].schedule = schedule
             }
         case .timeUnlock:
             healthGoal.timeBlockGoal.unlockTimeMinutes = Int(target)
+            healthGoal.timeBlockGoal.schedule = schedule
         }
         
         saveGoal()
@@ -471,17 +609,70 @@ final class DashboardViewModel: GoalStatusProvider {
         await checkGoalStatus()
     }
     
-    /// Schedules a goal change to take effect tomorrow at midnight.
+    /// Schedules per-goal pending changes to take effect tomorrow at midnight.
     ///
-    /// **Why defer?** The "Next-Day Effect" removes the immediate gratification of
-    /// weakening goals while blocked. Users can still adjust, but only for tomorrow.
+    /// **Why per-goal?** Multiple goals can be edited independently during the same
+    /// day. Each deferred edit is stored separately so later edits don't overwrite
+    /// earlier pending changes for different goal types.
     func schedulePendingGoal(_ newGoal: HealthGoal) {
-        var normalizedGoal = newGoal
-        normalizedGoal.blockingStrategy = .all
-        healthGoal.pendingGoal = PendingHealthGoal(from: normalizedGoal)
-        healthGoal.pendingGoalEffectiveDate = Calendar.current.startOfDay(
+        let effectiveDate = Calendar.current.startOfDay(
             for: Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
         )
+
+        // Recompute the pending entry for every goal type. Explicitly clear
+        // the matching pending field when the latest proposal no longer differs
+        // from the live goal, so reverted edits don't fire stale changes at midnight.
+        if newGoal.stepGoal != healthGoal.stepGoal {
+            healthGoal.pendingStepGoal = newGoal.stepGoal
+        } else {
+            healthGoal.pendingStepGoal = nil
+        }
+        if newGoal.activeEnergyGoal != healthGoal.activeEnergyGoal {
+            healthGoal.pendingActiveEnergyGoal = newGoal.activeEnergyGoal
+        } else {
+            healthGoal.pendingActiveEnergyGoal = nil
+        }
+        for proposedExercise in newGoal.exerciseGoals {
+            let current = healthGoal.exerciseGoals.first { $0.id == proposedExercise.id }
+            if proposedExercise != current {
+                if let idx = healthGoal.pendingExerciseGoals.firstIndex(where: { $0.id == proposedExercise.id }) {
+                    healthGoal.pendingExerciseGoals[idx] = proposedExercise
+                } else {
+                    healthGoal.pendingExerciseGoals.append(proposedExercise)
+                }
+            } else {
+                // Proposal matches live state — clear any stale pending edit.
+                healthGoal.pendingExerciseGoals.removeAll { $0.id == proposedExercise.id }
+            }
+        }
+        // Detect exercise goals that were deleted in the proposed configuration.
+        // `newGoal.exerciseGoals` omits deleted goals, so we compare the current
+        // array against the proposal to find removals.
+        for currentExercise in healthGoal.exerciseGoals {
+            let stillExists = newGoal.exerciseGoals.contains { $0.id == currentExercise.id }
+            if !stillExists {
+                healthGoal.pendingExerciseGoalDeletions.insert(currentExercise.id)
+                // Remove any pending edit for this goal — deletion supersedes edits.
+                healthGoal.pendingExerciseGoals.removeAll { $0.id == currentExercise.id }
+            } else {
+                // Goal is back in the proposal — clear any stale deletion marker.
+                healthGoal.pendingExerciseGoalDeletions.remove(currentExercise.id)
+            }
+        }
+        if newGoal.timeBlockGoal != healthGoal.timeBlockGoal {
+            healthGoal.pendingTimeBlockGoal = newGoal.timeBlockGoal
+        } else {
+            healthGoal.pendingTimeBlockGoal = nil
+        }
+
+        // Only store the effective date if there are actual pending changes.
+        // Avoids a dangling date that would trigger applyPendingIfReady with
+        // nothing to apply.
+        if healthGoal.hasPendingChanges {
+            healthGoal.pendingGoalEffectiveDate = effectiveDate
+        } else {
+            healthGoal.pendingGoalEffectiveDate = nil
+        }
         saveGoal()
     }
     
@@ -489,19 +680,15 @@ final class DashboardViewModel: GoalStatusProvider {
     /// **Why async?** Must update blocking status immediately after applying the change.
     /// - Parameter newGoal: The proposed goal configuration to apply now
     func applyEmergencyChange(_ newGoal: HealthGoal) async {
-        var normalizedGoal = newGoal
-        normalizedGoal.blockingStrategy = .all
-
         // Apply the changes immediately
-        healthGoal.stepGoal = normalizedGoal.stepGoal
-        healthGoal.activeEnergyGoal = normalizedGoal.activeEnergyGoal
-        healthGoal.exerciseGoals = normalizedGoal.exerciseGoals
-        healthGoal.timeBlockGoal = normalizedGoal.timeBlockGoal
+        healthGoal.stepGoal = newGoal.stepGoal
+        healthGoal.activeEnergyGoal = newGoal.activeEnergyGoal
+        healthGoal.exerciseGoals = newGoal.exerciseGoals
+        healthGoal.timeBlockGoal = newGoal.timeBlockGoal
         healthGoal.blockingStrategy = .all
         
         // Clear any pending changes since we're applying now
-        healthGoal.pendingGoal = nil
-        healthGoal.pendingGoalEffectiveDate = nil
+        healthGoal.clearPendingChanges()
         
         saveGoal()
         
@@ -510,11 +697,10 @@ final class DashboardViewModel: GoalStatusProvider {
         await checkGoalStatus()
     }
     
-    /// Cancels any pending goal changes for today.
-    /// **Why expose this?** Allows users to change their mind before the change takes effect.
+    /// Cancels all pending goal changes.
+    /// **Why expose this?** Allows users to change their mind before changes take effect.
     func cancelPendingGoal() {
-        healthGoal.pendingGoal = nil
-        healthGoal.pendingGoalEffectiveDate = nil
+        healthGoal.clearPendingChanges()
         saveGoal()
     }
 
@@ -532,13 +718,25 @@ final class DashboardViewModel: GoalStatusProvider {
 
     // MARK: - Private Methods
 
+    /// Returns whether a specific goal has a deferred edit scheduled for midnight.
+    private func hasGoalPendingChange(type: GoalType, exerciseGoalId: UUID? = nil) -> Bool {
+        switch type {
+        case .steps:
+            return healthGoal.pendingStepGoal != nil
+        case .activeEnergy:
+            return healthGoal.pendingActiveEnergyGoal != nil
+        case .exercise:
+            guard let exerciseGoalId else { return false }
+            return healthGoal.pendingExerciseGoals.contains { $0.id == exerciseGoalId }
+                || healthGoal.pendingExerciseGoalDeletions.contains(exerciseGoalId)
+        case .timeUnlock:
+            return healthGoal.pendingTimeBlockGoal != nil
+        }
+    }
+
     /// Persists the health goal to App Group UserDefaults.
     private func saveGoal() {
         healthGoal.blockingStrategy = .all
-        if var pending = healthGoal.pendingGoal {
-            pending.blockingStrategy = .all
-            healthGoal.pendingGoal = pending
-        }
         HealthGoal.save(healthGoal)
     }
     
@@ -560,6 +758,11 @@ final class DashboardViewModel: GoalStatusProvider {
             currentSteps = 0
             currentActiveEnergy = 0
             currentExerciseMinutes = [:]
+        }
+
+        // Disable any one-time goals whose today-only schedule has expired.
+        if healthGoal.expireGoalsIfNeeded() {
+            saveGoal()
         }
     }
     
@@ -594,12 +797,13 @@ final class DashboardViewModel: GoalStatusProvider {
         healthGoal = HealthGoal.load()
         
         // Apply pending changes if the effective date has passed
-        if var pending = healthGoal.pendingGoal {
-            pending.blockingStrategy = .all
-            healthGoal.pendingGoal = pending
-        }
         if healthGoal.applyPendingIfReady() {
             healthGoal.blockingStrategy = .all
+            saveGoal()
+        }
+
+        // Disable any one-time goals whose today-only schedule has expired.
+        if healthGoal.expireGoalsIfNeeded() {
             saveGoal()
         }
         

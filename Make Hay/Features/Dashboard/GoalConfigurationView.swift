@@ -56,6 +56,7 @@ struct GoalConfigurationView: View {
     @State private var targetValue: Double
     @State private var selectedExerciseType: ExerciseType = .any
     @State private var unlockTime: Date
+    @State private var selectedDays: Set<Weekday> = Set(Weekday.allCases)
     @State private var isSaving: Bool = false
     @State private var triggerSuccessHaptic: Bool = false
     @State private var showingRemoveConfirmation: Bool = false
@@ -92,12 +93,15 @@ struct GoalConfigurationView: View {
         switch goalType {
         case .steps:
             _targetValue = State(initialValue: Double(goal.stepGoal.target))
+            _selectedDays = State(initialValue: mode.isEditing ? goal.stepGoal.schedule.weekdays : Set(Weekday.allCases))
         case .activeEnergy:
             _targetValue = State(initialValue: Double(goal.activeEnergyGoal.target))
+            _selectedDays = State(initialValue: mode.isEditing ? goal.activeEnergyGoal.schedule.weekdays : Set(Weekday.allCases))
         case .exercise:
             if let exerciseGoal {
                 _targetValue = State(initialValue: Double(exerciseGoal.targetMinutes))
                 _selectedExerciseType = State(initialValue: exerciseGoal.exerciseType)
+                _selectedDays = State(initialValue: exerciseGoal.schedule.weekdays)
             } else if let lastExerciseGoal = goal.exerciseGoals.last {
                 _targetValue = State(initialValue: Double(lastExerciseGoal.targetMinutes))
                 _selectedExerciseType = State(initialValue: lastExerciseGoal.exerciseType)
@@ -107,6 +111,7 @@ struct GoalConfigurationView: View {
             }
         case .timeUnlock:
             _targetValue = State(initialValue: Double(goal.timeBlockGoal.unlockTimeMinutes))
+            _selectedDays = State(initialValue: mode.isEditing ? goal.timeBlockGoal.schedule.weekdays : Set(Weekday.allCases))
         }
     }
     
@@ -141,6 +146,20 @@ struct GoalConfigurationView: View {
                 }
             }
             
+            Section {
+                NavigationLink {
+                    RepeatDayPickerView(selectedDays: $selectedDays)
+                } label: {
+                    HStack {
+                        Text(String(localized: "Repeat"))
+                        Spacer()
+                        Text(GoalSchedule.from(weekdays: selectedDays).displaySummary)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityIdentifier("repeatScheduleRow")
+            }
+            
             // Remove goal section (only shown in edit mode)
             if mode.isEditing {
                 Section {
@@ -165,21 +184,25 @@ struct GoalConfigurationView: View {
                     ProgressView()
                         .accessibilityIdentifier("savingIndicator")
                 } else {
-                    Button(mode.isEditing ? String(localized: "Save") : String(localized: "Add")) {
+                    Button {
                         saveGoal()
+                    } label: {
+                        Image(systemName: "checkmark")
                     }
                     .disabled(!isValidInput)
                     .accessibilityIdentifier(mode.isEditing ? "saveGoalButton" : "addGoalConfirmButton")
+                    .accessibilityLabel(mode.isEditing ? String(localized: "Save") : String(localized: "Add"))
                 }
             }
             
-            if mode.isEditing {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(String(localized: "Cancel")) {
-                        dismiss()
-                    }
-                    .accessibilityIdentifier("cancelEditButton")
+            ToolbarItem(placement: .cancellationAction) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
                 }
+                .accessibilityIdentifier("cancelEditButton")
+                .accessibilityLabel(String(localized: "Cancel"))
             }
         }
         .disabled(isSaving)
@@ -319,6 +342,9 @@ struct GoalConfigurationView: View {
         isSaving = true
         
         Task {
+            // Build the GoalSchedule from the picker's day selection.
+            let schedule = GoalSchedule.from(weekdays: selectedDays)
+
             let currentGoal = viewModel.healthGoal
             var newGoal = currentGoal
             
@@ -327,16 +353,20 @@ struct GoalConfigurationView: View {
                 switch goalType {
                 case .steps:
                     newGoal.stepGoal.target = Int(targetValue)
+                    newGoal.stepGoal.schedule = schedule
                 case .activeEnergy:
                     newGoal.activeEnergyGoal.target = Int(targetValue)
+                    newGoal.activeEnergyGoal.schedule = schedule
                 case .exercise:
                     if let exerciseGoalId = mode.exerciseGoalId,
                        let index = newGoal.exerciseGoals.firstIndex(where: { $0.id == exerciseGoalId }) {
                         newGoal.exerciseGoals[index].targetMinutes = Int(targetValue)
                         newGoal.exerciseGoals[index].exerciseType = selectedExerciseType
+                        newGoal.exerciseGoals[index].schedule = schedule
                     }
                 case .timeUnlock:
                     newGoal.timeBlockGoal.unlockTimeMinutes = Int(targetValue)
+                    newGoal.timeBlockGoal.schedule = schedule
                 }
             } else {
                 // Add new goal
@@ -344,19 +374,23 @@ struct GoalConfigurationView: View {
                 case .steps:
                     newGoal.stepGoal.isEnabled = true
                     newGoal.stepGoal.target = Int(targetValue)
+                    newGoal.stepGoal.schedule = schedule
                 case .activeEnergy:
                     newGoal.activeEnergyGoal.isEnabled = true
                     newGoal.activeEnergyGoal.target = Int(targetValue)
+                    newGoal.activeEnergyGoal.schedule = schedule
                 case .exercise:
                     let newExerciseGoal = ExerciseGoal(
                         isEnabled: true,
                         targetMinutes: Int(targetValue),
-                        exerciseType: selectedExerciseType
+                        exerciseType: selectedExerciseType,
+                        schedule: schedule
                     )
                     newGoal.exerciseGoals.append(newExerciseGoal)
                 case .timeUnlock:
                     newGoal.timeBlockGoal.isEnabled = true
                     newGoal.timeBlockGoal.unlockTimeMinutes = Int(targetValue)
+                    newGoal.timeBlockGoal.schedule = schedule
                 }
             }
             
@@ -380,13 +414,15 @@ struct GoalConfigurationView: View {
                         type: goalType,
                         target: targetValue,
                         exerciseGoalId: mode.exerciseGoalId,
-                        exerciseType: selectedExerciseType
+                        exerciseType: selectedExerciseType,
+                        schedule: schedule
                     )
                 } else {
                     await viewModel.addGoal(
                         type: goalType,
                         target: targetValue,
-                        exerciseType: selectedExerciseType
+                        exerciseType: selectedExerciseType,
+                        schedule: schedule
                     )
                 }
                 

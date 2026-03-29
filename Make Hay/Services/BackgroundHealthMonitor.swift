@@ -193,7 +193,12 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
     /// already unblocked due to a transient error.
     private func evaluateAndUpdateShields() async {
         // Load the goal configuration.
-        let goal = HealthGoal.load()
+        var goal = HealthGoal.load()
+
+        // Disable any one-time goals whose expirationDate has passed.
+        if goal.expireGoalsIfNeeded() {
+            HealthGoal.save(goal)
+        }
 
         // Bail early if no goals are configured — nothing to evaluate.
         let hasGoals = GoalBlockingEvaluator.hasEnabledGoals(goal: goal)

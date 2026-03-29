@@ -16,6 +16,7 @@ import SwiftUI
 struct GoalProgressRowView: View {
 
     let progress: GoalProgress
+    var isInactive: Bool = false
     let onTap: () -> Void
 
     var body: some View {
@@ -25,6 +26,7 @@ struct GoalProgressRowView: View {
                 progressGauge
             }
             .padding(.vertical, 8)
+            .opacity(isInactive ? 0.45 : 1.0)
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
@@ -34,21 +36,34 @@ struct GoalProgressRowView: View {
 
     // MARK: - Subviews
 
-    /// Icon, title, exercise sub-label, current/target text, and chevron.
+    /// Icon, title, exercise sub-label, schedule label, pending indicator, current/target text, and chevron.
     private var headerRow: some View {
         HStack(spacing: 8) {
             goalIcon
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(progress.type.displayName)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.primary)
+                HStack(spacing: 4) {
+                    Text(progress.type.displayName)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+
+                    if progress.hasPendingChange {
+                        Image(systemName: "calendar.badge.clock")
+                            .font(.caption2)
+                            .foregroundStyle(Color.statusInfo)
+                            .accessibilityLabel(String(localized: "Pending change scheduled"))
+                    }
+                }
 
                 if let exerciseType = progress.exerciseType, exerciseType != .any {
                     Text(exerciseType.displayName)
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
+
+                Text(progress.schedule.displaySummary)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
 
             Spacer()
@@ -170,7 +185,9 @@ struct GoalProgressRowView: View {
             progress: 0.45,
             isMet: false,
             exerciseGoalId: nil,
-            exerciseType: nil
+            exerciseType: nil,
+            schedule: .everyDay,
+            hasPendingChange: false
         ),
         onTap: {}
     )
@@ -186,8 +203,65 @@ struct GoalProgressRowView: View {
             progress: 1.0,
             isMet: true,
             exerciseGoalId: nil,
-            exerciseType: nil
+            exerciseType: nil,
+            schedule: .everyDay,
+            hasPendingChange: false
         ),
+        onTap: {}
+    )
+    .padding()
+}
+
+#Preview("Weekdays Schedule Label") {
+    GoalProgressRowView(
+        progress: GoalProgress(
+            type: .steps,
+            current: 3_200,
+            target: 8_000,
+            progress: 0.4,
+            isMet: false,
+            exerciseGoalId: nil,
+            exerciseType: nil,
+            schedule: .weekdays,
+            hasPendingChange: false
+        ),
+        onTap: {}
+    )
+    .padding()
+}
+
+#Preview("Pending Change Indicator") {
+    GoalProgressRowView(
+        progress: GoalProgress(
+            type: .activeEnergy,
+            current: 200,
+            target: 500,
+            progress: 0.4,
+            isMet: false,
+            exerciseGoalId: nil,
+            exerciseType: nil,
+            schedule: .weekdays,
+            hasPendingChange: true
+        ),
+        onTap: {}
+    )
+    .padding()
+}
+
+#Preview("Inactive / Dimmed") {
+    GoalProgressRowView(
+        progress: GoalProgress(
+            type: .exercise,
+            current: 0,
+            target: 30,
+            progress: 0,
+            isMet: false,
+            exerciseGoalId: UUID(),
+            exerciseType: .running,
+            schedule: .weekends,
+            hasPendingChange: false
+        ),
+        isInactive: true,
         onTap: {}
     )
     .padding()

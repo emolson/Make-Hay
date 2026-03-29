@@ -16,7 +16,7 @@ enum PendingChangeContext {
     var navigationTitle: String {
         switch self {
         case .goalChange:
-            return String(localized: "Update Goal?")
+            return String(localized: "Change Scheduled for Tomorrow")
         case .blockedAppsChange:
             return String(localized: "Update Blocked Apps?")
         }
@@ -25,7 +25,7 @@ enum PendingChangeContext {
     var headline: String {
         switch self {
         case .goalChange:
-            return String(localized: "Preserve Your Momentum")
+            return String(localized: "Change Scheduled for Tomorrow")
         case .blockedAppsChange:
             return String(localized: "Keep Your Guardrails Intact")
         }
@@ -34,7 +34,7 @@ enum PendingChangeContext {
     var message: String {
         switch self {
         case .goalChange:
-            return String(localized: "You are lowering your target. To preserve your momentum, this change will take effect tomorrow morning.")
+            return String(localized: "To maintain your current progress and blocker status, this change will take effect tomorrow morning. Do you want to save it?")
         case .blockedAppsChange:
             return String(localized: "Your goals are not met yet. To preserve your commitment, blocked-app changes will take effect tomorrow morning.")
         }
@@ -61,9 +61,9 @@ enum PendingChangeContext {
     var scheduleButtonLabel: String {
         switch self {
         case .goalChange:
-            return String(localized: "Schedule for Tomorrow")
+            return String(localized: "Save for Tomorrow")
         case .blockedAppsChange:
-            return String(localized: "Schedule for Tomorrow")
+            return String(localized: "Save for Tomorrow")
         }
     }
 

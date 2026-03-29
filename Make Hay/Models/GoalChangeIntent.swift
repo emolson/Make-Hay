@@ -36,6 +36,11 @@ enum GoalChangeIntent: Sendable {
             } else if proposed.stepGoal.target > original.stepGoal.target {
                 hasHarder = true
             }
+            // Removing today from repeat schedule is easier (defers to tomorrow)
+            if original.stepGoal.schedule.includestoday
+                && !proposed.stepGoal.schedule.includestoday {
+                hasEasier = true
+            }
         } else if original.stepGoal.isEnabled && !proposed.stepGoal.isEnabled {
             // Disabling a goal is easier
             hasEasier = true
@@ -50,6 +55,10 @@ enum GoalChangeIntent: Sendable {
                 hasEasier = true
             } else if proposed.activeEnergyGoal.target > original.activeEnergyGoal.target {
                 hasHarder = true
+            }
+            if original.activeEnergyGoal.schedule.includestoday
+                && !proposed.activeEnergyGoal.schedule.includestoday {
+                hasEasier = true
             }
         } else if original.activeEnergyGoal.isEnabled && !proposed.activeEnergyGoal.isEnabled {
             hasEasier = true
@@ -66,6 +75,10 @@ enum GoalChangeIntent: Sendable {
                         hasEasier = true
                     } else if proposedExercise.targetMinutes > originalExercise.targetMinutes {
                         hasHarder = true
+                    }
+                    if originalExercise.schedule.includestoday
+                        && !proposedExercise.schedule.includestoday {
+                        hasEasier = true
                     }
                 } else {
                     // Re-enabling a goal is harder
@@ -92,6 +105,10 @@ enum GoalChangeIntent: Sendable {
                 hasEasier = true
             } else if proposed.timeBlockGoal.unlockTimeMinutes > original.timeBlockGoal.unlockTimeMinutes {
                 hasHarder = true
+            }
+            if original.timeBlockGoal.schedule.includestoday
+                && !proposed.timeBlockGoal.schedule.includestoday {
+                hasEasier = true
             }
         } else if original.timeBlockGoal.isEnabled && !proposed.timeBlockGoal.isEnabled {
             hasEasier = true

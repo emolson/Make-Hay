@@ -8,6 +8,173 @@
 import Foundation
 import HealthKit
 
+/// Days of the week used for goal repeat scheduling.
+/// **Why Int raw values starting at 1?** Matches `Calendar.current.component(.weekday)`,
+/// where Sunday = 1 ... Saturday = 7, enabling direct comparison without mapping.
+enum Weekday: Int, Codable, Sendable, CaseIterable, Identifiable, Comparable {
+    case sunday = 1
+    case monday = 2
+    case tuesday = 3
+    case wednesday = 4
+    case thursday = 5
+    case friday = 6
+    case saturday = 7
+
+    var id: Int { rawValue }
+
+    /// Short display name (e.g. "Mon").
+    var shortName: String {
+        let symbols = Calendar.current.shortWeekdaySymbols
+        return symbols[rawValue - 1]
+    }
+
+    /// Full display name (e.g. "Monday").
+    var fullName: String {
+        let symbols = Calendar.current.weekdaySymbols
+        return symbols[rawValue - 1]
+    }
+
+    /// The current weekday based on the user's calendar.
+    static var today: Weekday {
+        let component = Calendar.current.component(.weekday, from: Date())
+        return Weekday(rawValue: component) ?? .sunday
+    }
+
+    /// Ordered cases starting with Monday for display purposes.
+    static var orderedCases: [Weekday] {
+        [.monday, .tuesday, .wednesday, .thursday, .friday, .saturday, .sunday]
+    }
+
+    nonisolated static func < (lhs: Weekday, rhs: Weekday) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
+}
+
+/// Describes when a goal is active.
+///
+/// **Why an enum instead of `Set<Weekday>` + `expirationDate: Date?`?**
+/// The previous design used an empty set as a magic sentinel for "today only"
+/// and required a separate `expirationDate` field that had to stay in sync.
+/// This enum makes the two cases explicit and compiler-enforced — impossible
+/// states (empty set without expiration, recurring with expiration) are
+/// unrepresentable.
+enum GoalSchedule: Sendable, Equatable {
+    /// Repeats on the specified weekdays (must be non-empty).
+    case recurring(Set<Weekday>)
+    /// Active today only; auto-disables after `expires`.
+    case todayOnly(expires: Date)
+
+    // MARK: - Convenience Factories
+
+    /// All seven days.
+    static let everyDay: GoalSchedule = .recurring(Set(Weekday.allCases))
+    /// Monday through Friday.
+    static let weekdays: GoalSchedule = .recurring([.monday, .tuesday, .wednesday, .thursday, .friday])
+    /// Saturday and Sunday.
+    static let weekends: GoalSchedule = .recurring([.saturday, .sunday])
+
+    // MARK: - Queries
+
+    /// Whether this schedule includes today's weekday.
+    /// A `.todayOnly` schedule always includes today (the expiration check is
+    /// handled separately by `expireGoalsIfNeeded`).
+    var includestoday: Bool {
+        switch self {
+        case .recurring(let days): return days.contains(Weekday.today)
+        case .todayOnly: return true
+        }
+    }
+
+    /// Constructs a `GoalSchedule` from a picker's day selection.
+    /// An empty set becomes `.todayOnly` with expiration at start-of-tomorrow.
+    static func from(weekdays: Set<Weekday>) -> GoalSchedule {
+        if weekdays.isEmpty {
+            let tomorrow = Calendar.current.startOfDay(
+                for: Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+            )
+            return .todayOnly(expires: tomorrow)
+        }
+        return .recurring(weekdays)
+    }
+
+    /// Human-readable summary for display in the UI.
+    var displaySummary: String {
+        switch self {
+        case .recurring(let days):
+            let all = Set(Weekday.allCases)
+            let wkdays: Set<Weekday> = [.monday, .tuesday, .wednesday, .thursday, .friday]
+            let wkends: Set<Weekday> = [.saturday, .sunday]
+            if days == all { return String(localized: "Every day") }
+            if days == wkdays { return String(localized: "Weekdays") }
+            if days == wkends { return String(localized: "Weekends") }
+            return Weekday.orderedCases
+                .filter { days.contains($0) }
+                .map(\.shortName)
+                .joined(separator: ", ")
+        case .todayOnly:
+            return String(localized: "Today only")
+        }
+    }
+
+    /// The raw weekday set, or an empty set for `.todayOnly`.
+    /// Useful for pre-filling the day picker when editing a goal.
+    var weekdays: Set<Weekday> {
+        switch self {
+        case .recurring(let days): return days
+        case .todayOnly: return []
+        }
+    }
+
+    /// The expiration date, if this is a `.todayOnly` schedule.
+    var expirationDate: Date? {
+        switch self {
+        case .recurring: return nil
+        case .todayOnly(let expires): return expires
+        }
+    }
+}
+
+// MARK: - Codable
+
+extension GoalSchedule: Codable {
+    /// **Encoding format:**
+    /// - `.recurring`: `{"type": "recurring", "weekdays": [1,2,3,...]}`
+    /// - `.todayOnly`: `{"type": "todayOnly", "expires": <date>}`
+    private enum CodingKeys: String, CodingKey {
+        case type, weekdays, expires
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(String.self, forKey: .type)
+        switch type {
+        case "recurring":
+            let days = try container.decode(Set<Weekday>.self, forKey: .weekdays)
+            self = .recurring(days)
+        case "todayOnly":
+            let expires = try container.decode(Date.self, forKey: .expires)
+            self = .todayOnly(expires: expires)
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .type, in: container,
+                debugDescription: "Unknown GoalSchedule type: \(type)"
+            )
+        }
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .recurring(let days):
+            try container.encode("recurring", forKey: .type)
+            try container.encode(days, forKey: .weekdays)
+        case .todayOnly(let expires):
+            try container.encode("todayOnly", forKey: .type)
+            try container.encode(expires, forKey: .expires)
+        }
+    }
+}
+
 /// Model representing a user's daily health goal configuration.
 struct HealthGoal: Codable, Sendable, Equatable {
     /// The user's step goal configuration.
@@ -21,15 +188,36 @@ struct HealthGoal: Codable, Sendable, Equatable {
     /// Strategy for determining when goals unlock apps.
     var blockingStrategy: BlockingStrategy = .all
     
-    // MARK: - Pending Changes
+    // MARK: - Pending Changes (Per-Goal)
     
-    /// Pending goal changes scheduled to take effect tomorrow at midnight.
-    /// **Why separate type?** Avoids recursive value types while still persisting full state.
-    var pendingGoal: PendingHealthGoal?
+    /// Pending step goal change scheduled to take effect at `pendingGoalEffectiveDate`.
+    /// `nil` means no pending change for this goal type.
+    var pendingStepGoal: StepGoal?
+    /// Pending active energy goal change.
+    var pendingActiveEnergyGoal: ActiveEnergyGoal?
+    /// Pending exercise goal changes, matched by ID.
+    /// Only exercise goals that were actually edited appear here.
+    var pendingExerciseGoals: [ExerciseGoal] = []
+    /// IDs of exercise goals scheduled for deletion at `pendingGoalEffectiveDate`.
+    /// **Why separate from `pendingExerciseGoals`?** Edits store a full `ExerciseGoal`
+    /// to replace by ID, but deletions have no replacement object. A dedicated set
+    /// avoids conflating "disabled" with "deleted" and keeps intent explicit.
+    var pendingExerciseGoalDeletions: Set<UUID> = []
+    /// Pending time-block goal change.
+    var pendingTimeBlockGoal: TimeBlockGoal?
     
     /// The date when pending changes should take effect (midnight of next day).
     /// **Why Date?** Allows precise comparison to determine when to apply changes.
     var pendingGoalEffectiveDate: Date?
+    
+    /// Whether any per-goal pending changes exist.
+    var hasPendingChanges: Bool {
+        pendingStepGoal != nil
+            || pendingActiveEnergyGoal != nil
+            || !pendingExerciseGoals.isEmpty
+            || !pendingExerciseGoalDeletions.isEmpty
+            || pendingTimeBlockGoal != nil
+    }
 
     nonisolated init(
         stepGoal: StepGoal = .init(),
@@ -37,7 +225,11 @@ struct HealthGoal: Codable, Sendable, Equatable {
         exerciseGoals: [ExerciseGoal] = [],
         timeBlockGoal: TimeBlockGoal = .init(),
         blockingStrategy: BlockingStrategy = .all,
-        pendingGoal: PendingHealthGoal? = nil,
+        pendingStepGoal: StepGoal? = nil,
+        pendingActiveEnergyGoal: ActiveEnergyGoal? = nil,
+        pendingExerciseGoals: [ExerciseGoal] = [],
+        pendingExerciseGoalDeletions: Set<UUID> = [],
+        pendingTimeBlockGoal: TimeBlockGoal? = nil,
         pendingGoalEffectiveDate: Date? = nil
     ) {
         self.stepGoal = stepGoal
@@ -45,33 +237,98 @@ struct HealthGoal: Codable, Sendable, Equatable {
         self.exerciseGoals = exerciseGoals
         self.timeBlockGoal = timeBlockGoal
         self.blockingStrategy = blockingStrategy
-        self.pendingGoal = pendingGoal
+        self.pendingStepGoal = pendingStepGoal
+        self.pendingActiveEnergyGoal = pendingActiveEnergyGoal
+        self.pendingExerciseGoals = pendingExerciseGoals
+        self.pendingExerciseGoalDeletions = pendingExerciseGoalDeletions
+        self.pendingTimeBlockGoal = pendingTimeBlockGoal
         self.pendingGoalEffectiveDate = pendingGoalEffectiveDate
     }
     
     /// Applies pending goal changes if the effective date has passed.
-    /// **Why mutating?** This modifies the current goal state by copying pending values.
-    /// - Returns: True if pending changes were applied, false if no changes were pending or not yet effective.
+    /// Each per-goal pending field is applied independently and then cleared.
+    /// - Returns: True if any pending changes were applied.
     @discardableResult
     mutating func applyPendingIfReady() -> Bool {
-        guard let pendingGoal,
+        guard hasPendingChanges,
               let effectiveDate = pendingGoalEffectiveDate,
               Date() >= effectiveDate else {
             return false
         }
         
-        // Apply all pending changes
-        self.stepGoal = pendingGoal.stepGoal
-        self.activeEnergyGoal = pendingGoal.activeEnergyGoal
-        self.exerciseGoals = pendingGoal.exerciseGoals
-        self.timeBlockGoal = pendingGoal.timeBlockGoal
-        self.blockingStrategy = pendingGoal.blockingStrategy
+        if let pending = pendingStepGoal {
+            self.stepGoal = pending
+        }
+        if let pending = pendingActiveEnergyGoal {
+            self.activeEnergyGoal = pending
+        }
+        for pendingExercise in pendingExerciseGoals {
+            if let index = exerciseGoals.firstIndex(where: { $0.id == pendingExercise.id }) {
+                exerciseGoals[index] = pendingExercise
+            }
+        }
+        // Apply deferred exercise-goal deletions
+        if !pendingExerciseGoalDeletions.isEmpty {
+            exerciseGoals.removeAll { pendingExerciseGoalDeletions.contains($0.id) }
+        }
+        if let pending = pendingTimeBlockGoal {
+            self.timeBlockGoal = pending
+        }
         
-        // Clear pending state
-        self.pendingGoal = nil
-        self.pendingGoalEffectiveDate = nil
+        // Clear all pending state
+        clearPendingChanges()
         
         return true
+    }
+    
+    /// Clears all per-goal pending changes and the effective date.
+    mutating func clearPendingChanges() {
+        pendingStepGoal = nil
+        pendingActiveEnergyGoal = nil
+        pendingExerciseGoals = []
+        pendingExerciseGoalDeletions = []
+        pendingTimeBlockGoal = nil
+        pendingGoalEffectiveDate = nil
+    }
+
+    /// Disables any enabled goal whose `.todayOnly` schedule has expired.
+    ///
+    /// **Why per sub-goal?** Each goal can have an independent "today only" schedule
+    /// with its own expiration. Checking all four types ensures no stale one-time goal
+    /// persists after midnight.
+    ///
+    /// - Parameter now: The reference date (defaults to `Date()`; injectable for tests).
+    /// - Returns: `true` if any goal was expired and disabled.
+    @discardableResult
+    mutating func expireGoalsIfNeeded(now: Date = Date()) -> Bool {
+        var changed = false
+
+        if stepGoal.isEnabled, case .todayOnly(let exp) = stepGoal.schedule, now >= exp {
+            stepGoal.isEnabled = false
+            stepGoal.schedule = .everyDay
+            changed = true
+        }
+        if activeEnergyGoal.isEnabled, case .todayOnly(let exp) = activeEnergyGoal.schedule, now >= exp {
+            activeEnergyGoal.isEnabled = false
+            activeEnergyGoal.schedule = .everyDay
+            changed = true
+        }
+        for index in exerciseGoals.indices {
+            if exerciseGoals[index].isEnabled,
+               case .todayOnly(let exp) = exerciseGoals[index].schedule,
+               now >= exp {
+                exerciseGoals[index].isEnabled = false
+                exerciseGoals[index].schedule = .everyDay
+                changed = true
+            }
+        }
+        if timeBlockGoal.isEnabled, case .todayOnly(let exp) = timeBlockGoal.schedule, now >= exp {
+            timeBlockGoal.isEnabled = false
+            timeBlockGoal.schedule = .everyDay
+            changed = true
+        }
+
+        return changed
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -80,19 +337,28 @@ struct HealthGoal: Codable, Sendable, Equatable {
         case exerciseGoals
         case timeBlockGoal
         case blockingStrategy
-        case pendingGoal
+        case pendingStepGoal
+        case pendingActiveEnergyGoal
+        case pendingExerciseGoals
+        case pendingExerciseGoalDeletions
+        case pendingTimeBlockGoal
         case pendingGoalEffectiveDate
     }
 
     nonisolated init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        
         self.init(
             stepGoal: try container.decodeIfPresent(StepGoal.self, forKey: .stepGoal) ?? .init(),
             activeEnergyGoal: try container.decodeIfPresent(ActiveEnergyGoal.self, forKey: .activeEnergyGoal) ?? .init(),
             exerciseGoals: try container.decodeIfPresent([ExerciseGoal].self, forKey: .exerciseGoals) ?? [],
             timeBlockGoal: try container.decodeIfPresent(TimeBlockGoal.self, forKey: .timeBlockGoal) ?? .init(),
             blockingStrategy: try container.decodeIfPresent(BlockingStrategy.self, forKey: .blockingStrategy) ?? .all,
-            pendingGoal: try container.decodeIfPresent(PendingHealthGoal.self, forKey: .pendingGoal),
+            pendingStepGoal: try container.decodeIfPresent(StepGoal.self, forKey: .pendingStepGoal),
+            pendingActiveEnergyGoal: try container.decodeIfPresent(ActiveEnergyGoal.self, forKey: .pendingActiveEnergyGoal),
+            pendingExerciseGoals: try container.decodeIfPresent([ExerciseGoal].self, forKey: .pendingExerciseGoals) ?? [],
+            pendingExerciseGoalDeletions: try container.decodeIfPresent(Set<UUID>.self, forKey: .pendingExerciseGoalDeletions) ?? [],
+            pendingTimeBlockGoal: try container.decodeIfPresent(TimeBlockGoal.self, forKey: .pendingTimeBlockGoal),
             pendingGoalEffectiveDate: try container.decodeIfPresent(Date.self, forKey: .pendingGoalEffectiveDate)
         )
     }
@@ -104,7 +370,15 @@ struct HealthGoal: Codable, Sendable, Equatable {
         try container.encode(exerciseGoals, forKey: .exerciseGoals)
         try container.encode(timeBlockGoal, forKey: .timeBlockGoal)
         try container.encode(blockingStrategy, forKey: .blockingStrategy)
-        try container.encodeIfPresent(pendingGoal, forKey: .pendingGoal)
+        try container.encodeIfPresent(pendingStepGoal, forKey: .pendingStepGoal)
+        try container.encodeIfPresent(pendingActiveEnergyGoal, forKey: .pendingActiveEnergyGoal)
+        if !pendingExerciseGoals.isEmpty {
+            try container.encode(pendingExerciseGoals, forKey: .pendingExerciseGoals)
+        }
+        if !pendingExerciseGoalDeletions.isEmpty {
+            try container.encode(pendingExerciseGoalDeletions, forKey: .pendingExerciseGoalDeletions)
+        }
+        try container.encodeIfPresent(pendingTimeBlockGoal, forKey: .pendingTimeBlockGoal)
         try container.encodeIfPresent(pendingGoalEffectiveDate, forKey: .pendingGoalEffectiveDate)
     }
 
@@ -127,66 +401,6 @@ struct HealthGoal: Codable, Sendable, Equatable {
         guard let data = try? JSONEncoder().encode(goal),
               let encoded = String(data: data, encoding: .utf8) else { return }
         defaults.set(encoded, forKey: storageKey)
-    }
-}
-
-/// Snapshot of a goal change scheduled to apply later.
-/// Stores the full goal configuration without recursive references.
-struct PendingHealthGoal: Codable, Sendable, Equatable {
-    var stepGoal: StepGoal
-    var activeEnergyGoal: ActiveEnergyGoal
-    var exerciseGoals: [ExerciseGoal]
-    var timeBlockGoal: TimeBlockGoal
-    var blockingStrategy: BlockingStrategy
-
-    nonisolated init(
-        stepGoal: StepGoal,
-        activeEnergyGoal: ActiveEnergyGoal,
-        exerciseGoals: [ExerciseGoal],
-        timeBlockGoal: TimeBlockGoal,
-        blockingStrategy: BlockingStrategy
-    ) {
-        self.stepGoal = stepGoal
-        self.activeEnergyGoal = activeEnergyGoal
-        self.exerciseGoals = exerciseGoals
-        self.timeBlockGoal = timeBlockGoal
-        self.blockingStrategy = blockingStrategy
-    }
-    
-    init(from goal: HealthGoal) {
-        self.stepGoal = goal.stepGoal
-        self.activeEnergyGoal = goal.activeEnergyGoal
-        self.exerciseGoals = goal.exerciseGoals
-        self.timeBlockGoal = goal.timeBlockGoal
-        self.blockingStrategy = goal.blockingStrategy
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case stepGoal
-        case activeEnergyGoal
-        case exerciseGoals
-        case timeBlockGoal
-        case blockingStrategy
-    }
-
-    nonisolated init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(
-            stepGoal: try container.decode(StepGoal.self, forKey: .stepGoal),
-            activeEnergyGoal: try container.decode(ActiveEnergyGoal.self, forKey: .activeEnergyGoal),
-            exerciseGoals: try container.decode([ExerciseGoal].self, forKey: .exerciseGoals),
-            timeBlockGoal: try container.decode(TimeBlockGoal.self, forKey: .timeBlockGoal),
-            blockingStrategy: try container.decode(BlockingStrategy.self, forKey: .blockingStrategy)
-        )
-    }
-
-    nonisolated func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(stepGoal, forKey: .stepGoal)
-        try container.encode(activeEnergyGoal, forKey: .activeEnergyGoal)
-        try container.encode(exerciseGoals, forKey: .exerciseGoals)
-        try container.encode(timeBlockGoal, forKey: .timeBlockGoal)
-        try container.encode(blockingStrategy, forKey: .blockingStrategy)
     }
 }
 
@@ -243,20 +457,20 @@ enum GoalBlockingEvaluator {
     private nonisolated static func goalProgresses(goal: HealthGoal, snapshot: GoalEvaluationSnapshot) -> [Bool] {
         var progresses: [Bool] = []
 
-        if goal.stepGoal.isEnabled {
+        if goal.stepGoal.isEnabled && goal.stepGoal.schedule.includestoday {
             progresses.append(snapshot.steps >= goal.stepGoal.target)
         }
 
-        if goal.activeEnergyGoal.isEnabled {
+        if goal.activeEnergyGoal.isEnabled && goal.activeEnergyGoal.schedule.includestoday {
             progresses.append(snapshot.activeEnergy >= Double(goal.activeEnergyGoal.target))
         }
 
-        for exerciseGoal in goal.exerciseGoals where exerciseGoal.isEnabled {
+        for exerciseGoal in goal.exerciseGoals where exerciseGoal.isEnabled && exerciseGoal.schedule.includestoday {
             let current = snapshot.exerciseMinutesByGoalId[exerciseGoal.id] ?? 0
             progresses.append(current >= exerciseGoal.targetMinutes)
         }
 
-        if goal.timeBlockGoal.isEnabled {
+        if goal.timeBlockGoal.isEnabled && goal.timeBlockGoal.schedule.includestoday {
             let isMet = goal.timeBlockGoal.clampedUnlockMinutes == 0
                 || snapshot.currentMinutesSinceMidnight >= goal.timeBlockGoal.clampedUnlockMinutes
             progresses.append(isMet)
@@ -321,29 +535,12 @@ enum GoalGatekeeper {
 struct StepGoal: Codable, Sendable, Equatable {
     var isEnabled: Bool = true
     var target: Int = 8_000
+    var schedule: GoalSchedule = .everyDay
 
-    nonisolated init(isEnabled: Bool = true, target: Int = 8_000) {
+    nonisolated init(isEnabled: Bool = true, target: Int = 8_000, schedule: GoalSchedule = .everyDay) {
         self.isEnabled = isEnabled
         self.target = target
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case isEnabled
-        case target
-    }
-
-    nonisolated init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(
-            isEnabled: try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true,
-            target: try container.decodeIfPresent(Int.self, forKey: .target) ?? 8_000
-        )
-    }
-
-    nonisolated func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(isEnabled, forKey: .isEnabled)
-        try container.encode(target, forKey: .target)
+        self.schedule = schedule
     }
 }
 
@@ -351,29 +548,12 @@ struct StepGoal: Codable, Sendable, Equatable {
 struct ActiveEnergyGoal: Codable, Sendable, Equatable {
     var isEnabled: Bool = false
     var target: Int = 500
+    var schedule: GoalSchedule = .everyDay
 
-    nonisolated init(isEnabled: Bool = false, target: Int = 500) {
+    nonisolated init(isEnabled: Bool = false, target: Int = 500, schedule: GoalSchedule = .everyDay) {
         self.isEnabled = isEnabled
         self.target = target
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case isEnabled
-        case target
-    }
-
-    nonisolated init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(
-            isEnabled: try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? false,
-            target: try container.decodeIfPresent(Int.self, forKey: .target) ?? 500
-        )
-    }
-
-    nonisolated func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(isEnabled, forKey: .isEnabled)
-        try container.encode(target, forKey: .target)
+        self.schedule = schedule
     }
 }
 
@@ -383,42 +563,20 @@ struct ExerciseGoal: Codable, Sendable, Equatable, Identifiable {
     var isEnabled: Bool = true
     var targetMinutes: Int = 30
     var exerciseType: ExerciseType = .any
+    var schedule: GoalSchedule = .everyDay
 
     nonisolated init(
         id: UUID = UUID(),
         isEnabled: Bool = true,
         targetMinutes: Int = 30,
-        exerciseType: ExerciseType = .any
+        exerciseType: ExerciseType = .any,
+        schedule: GoalSchedule = .everyDay
     ) {
         self.id = id
         self.isEnabled = isEnabled
         self.targetMinutes = targetMinutes
         self.exerciseType = exerciseType
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case isEnabled
-        case targetMinutes
-        case exerciseType
-    }
-
-    nonisolated init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(
-            id: try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID(),
-            isEnabled: try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true,
-            targetMinutes: try container.decodeIfPresent(Int.self, forKey: .targetMinutes) ?? 30,
-            exerciseType: try container.decodeIfPresent(ExerciseType.self, forKey: .exerciseType) ?? .any
-        )
-    }
-
-    nonisolated func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encode(isEnabled, forKey: .isEnabled)
-        try container.encode(targetMinutes, forKey: .targetMinutes)
-        try container.encode(exerciseType, forKey: .exerciseType)
+        self.schedule = schedule
     }
 }
 
@@ -432,29 +590,12 @@ struct TimeBlockGoal: Codable, Sendable, Equatable {
     var isEnabled: Bool = false
     /// Minutes since midnight (0-1439). Default is 7 PM (19:00).
     var unlockTimeMinutes: Int = 19 * 60
+    var schedule: GoalSchedule = .everyDay
 
-    nonisolated init(isEnabled: Bool = false, unlockTimeMinutes: Int = 19 * 60) {
+    nonisolated init(isEnabled: Bool = false, unlockTimeMinutes: Int = 19 * 60, schedule: GoalSchedule = .everyDay) {
         self.isEnabled = isEnabled
         self.unlockTimeMinutes = unlockTimeMinutes
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case isEnabled
-        case unlockTimeMinutes
-    }
-
-    nonisolated init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(
-            isEnabled: try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? false,
-            unlockTimeMinutes: try container.decodeIfPresent(Int.self, forKey: .unlockTimeMinutes) ?? 19 * 60
-        )
-    }
-
-    nonisolated func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(isEnabled, forKey: .isEnabled)
-        try container.encode(unlockTimeMinutes, forKey: .unlockTimeMinutes)
+        self.schedule = schedule
     }
 }
 
