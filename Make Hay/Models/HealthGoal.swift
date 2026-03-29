@@ -23,25 +23,25 @@ enum Weekday: Int, Codable, Sendable, CaseIterable, Identifiable, Comparable {
     var id: Int { rawValue }
 
     /// Short display name (e.g. "Mon").
-    var shortName: String {
+    nonisolated var shortName: String {
         let symbols = Calendar.current.shortWeekdaySymbols
         return symbols[rawValue - 1]
     }
 
     /// Full display name (e.g. "Monday").
-    var fullName: String {
+    nonisolated var fullName: String {
         let symbols = Calendar.current.weekdaySymbols
         return symbols[rawValue - 1]
     }
 
     /// The current weekday based on the user's calendar.
-    static var today: Weekday {
+    nonisolated static var today: Weekday {
         let component = Calendar.current.component(.weekday, from: Date())
         return Weekday(rawValue: component) ?? .sunday
     }
 
     /// Ordered cases starting with Monday for display purposes.
-    static var orderedCases: [Weekday] {
+    nonisolated static var orderedCases: [Weekday] {
         [.monday, .tuesday, .wednesday, .thursday, .friday, .saturday, .sunday]
     }
 
@@ -67,18 +67,22 @@ enum GoalSchedule: Sendable, Equatable {
     // MARK: - Convenience Factories
 
     /// All seven days.
-    static let everyDay: GoalSchedule = .recurring(Set(Weekday.allCases))
+    nonisolated static let everyDay: GoalSchedule = .recurring([
+        .sunday, .monday, .tuesday, .wednesday, .thursday, .friday, .saturday
+    ])
     /// Monday through Friday.
-    static let weekdays: GoalSchedule = .recurring([.monday, .tuesday, .wednesday, .thursday, .friday])
+    nonisolated static let weekdays: GoalSchedule = .recurring([
+        .monday, .tuesday, .wednesday, .thursday, .friday
+    ])
     /// Saturday and Sunday.
-    static let weekends: GoalSchedule = .recurring([.saturday, .sunday])
+    nonisolated static let weekends: GoalSchedule = .recurring([.saturday, .sunday])
 
     // MARK: - Queries
 
     /// Whether this schedule includes today's weekday.
     /// A `.todayOnly` schedule always includes today (the expiration check is
     /// handled separately by `expireGoalsIfNeeded`).
-    var includestoday: Bool {
+    nonisolated var includestoday: Bool {
         switch self {
         case .recurring(let days): return days.contains(Weekday.today)
         case .todayOnly: return true
@@ -87,7 +91,7 @@ enum GoalSchedule: Sendable, Equatable {
 
     /// Constructs a `GoalSchedule` from a picker's day selection.
     /// An empty set becomes `.todayOnly` with expiration at start-of-tomorrow.
-    static func from(weekdays: Set<Weekday>) -> GoalSchedule {
+    nonisolated static func from(weekdays: Set<Weekday>) -> GoalSchedule {
         if weekdays.isEmpty {
             let tomorrow = Calendar.current.startOfDay(
                 for: Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
@@ -98,10 +102,10 @@ enum GoalSchedule: Sendable, Equatable {
     }
 
     /// Human-readable summary for display in the UI.
-    var displaySummary: String {
+    nonisolated var displaySummary: String {
         switch self {
         case .recurring(let days):
-            let all = Set(Weekday.allCases)
+            let all: Set<Weekday> = [.sunday, .monday, .tuesday, .wednesday, .thursday, .friday, .saturday]
             let wkdays: Set<Weekday> = [.monday, .tuesday, .wednesday, .thursday, .friday]
             let wkends: Set<Weekday> = [.saturday, .sunday]
             if days == all { return String(localized: "Every day") }
@@ -118,7 +122,7 @@ enum GoalSchedule: Sendable, Equatable {
 
     /// The raw weekday set, or an empty set for `.todayOnly`.
     /// Useful for pre-filling the day picker when editing a goal.
-    var weekdays: Set<Weekday> {
+    nonisolated var weekdays: Set<Weekday> {
         switch self {
         case .recurring(let days): return days
         case .todayOnly: return []
@@ -126,7 +130,7 @@ enum GoalSchedule: Sendable, Equatable {
     }
 
     /// The expiration date, if this is a `.todayOnly` schedule.
-    var expirationDate: Date? {
+    nonisolated var expirationDate: Date? {
         switch self {
         case .recurring: return nil
         case .todayOnly(let expires): return expires
@@ -211,7 +215,7 @@ struct HealthGoal: Codable, Sendable, Equatable {
     var pendingGoalEffectiveDate: Date?
     
     /// Whether any per-goal pending changes exist.
-    var hasPendingChanges: Bool {
+    nonisolated var hasPendingChanges: Bool {
         pendingStepGoal != nil
             || pendingActiveEnergyGoal != nil
             || !pendingExerciseGoals.isEmpty
@@ -249,7 +253,7 @@ struct HealthGoal: Codable, Sendable, Equatable {
     /// Each per-goal pending field is applied independently and then cleared.
     /// - Returns: True if any pending changes were applied.
     @discardableResult
-    mutating func applyPendingIfReady() -> Bool {
+        nonisolated mutating func applyPendingIfReady() -> Bool {
         guard hasPendingChanges,
               let effectiveDate = pendingGoalEffectiveDate,
               Date() >= effectiveDate else {
@@ -282,7 +286,7 @@ struct HealthGoal: Codable, Sendable, Equatable {
     }
     
     /// Clears all per-goal pending changes and the effective date.
-    mutating func clearPendingChanges() {
+    nonisolated mutating func clearPendingChanges() {
         pendingStepGoal = nil
         pendingActiveEnergyGoal = nil
         pendingExerciseGoals = []
@@ -300,7 +304,7 @@ struct HealthGoal: Codable, Sendable, Equatable {
     /// - Parameter now: The reference date (defaults to `Date()`; injectable for tests).
     /// - Returns: `true` if any goal was expired and disabled.
     @discardableResult
-    mutating func expireGoalsIfNeeded(now: Date = Date()) -> Bool {
+    nonisolated mutating func expireGoalsIfNeeded(now: Date = Date()) -> Bool {
         var changed = false
 
         if stepGoal.isEnabled, case .todayOnly(let exp) = stepGoal.schedule, now >= exp {
