@@ -4,83 +4,84 @@ You are writing tests for a SwiftUI iOS application. Follow these guidelines str
 
 ## Unit Tests (Swift Testing Framework)
 
-Use the modern Swift Testing framework, NOT XCTest for unit tests.
+Use the modern Swift Testing framework, not XCTest, for unit and feature logic tests.
+
+### Unit Test Guidelines
+- Import the app module as `@testable import Make_Hay`.
+- Prefer small, focused tests around domain rules, ViewModel state transitions, async orchestration, persistence edge cases, and concurrency-sensitive behavior.
+- Use protocol-based mocks and keep tests entitlement-free.
+- Mark tests `@MainActor` when exercising UI-facing ViewModels or other main-actor-isolated types.
+- Prefer descriptive `@Test("...")` names. Use parameterized tests when they materially reduce duplication.
 
 ### ViewModel Test Template
 ```swift
+import Foundation
 import Testing
-@testable import MakeHay
+@testable import Make_Hay
 
-@Suite("FeatureName ViewModel Tests")
 @MainActor
 struct FeatureNameViewModelTests {
-    
-    // MARK: - Properties
-    let mockUseCase: MockUseCaseProtocol
-    let sut: FeatureNameViewModel
-    
-    // MARK: - Setup
+    private let mockService: MockFeatureService
+    private let sut: FeatureNameViewModel
+
     init() {
-        mockUseCase = MockUseCaseProtocol()
-        sut = FeatureNameViewModel(useCase: mockUseCase)
+        mockService = MockFeatureService()
+        sut = FeatureNameViewModel(featureService: mockService)
     }
-    
-    // MARK: - Tests
-    @Test("Initial state is correct")
+
+    @Test("Initial state is idle")
     func initialState() {
         #expect(sut.isLoading == false)
         #expect(sut.errorMessage == nil)
     }
-    
-    @Test("Loading state updates correctly")
-    func loadingState() async {
-        // Given
-        mockUseCase.result = .success(expectedData)
-        
-        // When
-        await sut.loadData()
-        
-        // Then
+
+    @Test("Successful load updates state")
+    func loadSuccess() async {
+        mockService.result = .success(.fixture())
+
+        await sut.load()
+
         #expect(sut.isLoading == false)
-        #expect(sut.data == expectedData)
+        #expect(sut.errorMessage == nil)
+        #expect(mockService.loadCallCount == 1)
     }
-    
-    @Test("Error handling works correctly")
-    func errorHandling() async {
-        // Given
-        mockUseCase.result = .failure(TestError.networkError)
-        
-        // When
-        await sut.loadData()
-        
-        // Then
+
+    @Test("Failed load surfaces an error")
+    func loadFailure() async {
+        mockService.result = .failure(MockFeatureService.ErrorStub.failed)
+
+        await sut.load()
+
+        #expect(sut.isLoading == false)
         #expect(sut.errorMessage != nil)
-    }
-    
-    @Test(.tags(.critical), arguments: [1, 2, 3])
-    func parameterizedTest(value: Int) {
-        #expect(value > 0)
     }
 }
 ```
 
-### Mock Generation Template
+### Mock Template
 ```swift
+import Foundation
+@testable import Make_Hay
+
 @MainActor
-final class MockUseCaseProtocol: UseCaseProtocol {
-    var result: Result<DataType, Error> = .success(DataType())
-    var executeCallCount = 0
-    
-    func execute() async throws -> DataType {
-        executeCallCount += 1
+final class MockFeatureService: FeatureServiceProtocol {
+    enum ErrorStub: Error {
+        case failed
+    }
+
+    var result: Result<FeatureData, Error> = .success(.fixture())
+    private(set) var loadCallCount = 0
+
+    func load() async throws -> FeatureData {
+        loadCallCount += 1
         return try result.get()
     }
 }
 ```
 
-## UI Tests (XCUITest with Robot Pattern)
+## UI Tests (XCUITest)
 
-Use XCTest for UI tests with the Robot Pattern for maintainability.
+Use XCTest for UI tests. Prefer the Robot Pattern when a screen or flow has enough interaction to justify a reusable abstraction.
 
 ### Robot Template
 ```swift
@@ -88,48 +89,28 @@ import XCTest
 
 final class FeatureNameRobot {
     private let app: XCUIApplication
-    
-    init(_ app: XCUIApplication) {
+
+    init(app: XCUIApplication) {
         self.app = app
     }
-    
-    // MARK: - Element References
+
     private var titleLabel: XCUIElement {
-        app.staticTexts["feature-title"]
+        app.staticTexts["FeatureName.title"]
     }
-    
+
     private var actionButton: XCUIElement {
-        app.buttons["action-button"]
+        app.buttons["FeatureName.actionButton"]
     }
-    
-    private var textField: XCUIElement {
-        app.textFields["input-field"]
-    }
-    
-    // MARK: - Actions
+
     @discardableResult
-    func verifyScreenIsVisible() -> Self {
-        XCTAssertTrue(titleLabel.waitForExistence(timeout: 5))
+    func assertVisible(file: StaticString = #filePath, line: UInt = #line) -> Self {
+        XCTAssertTrue(titleLabel.waitForExistence(timeout: 5), file: file, line: line)
         return self
     }
-    
+
     @discardableResult
-    func enterText(_ text: String) -> Self {
-        textField.tap()
-        textField.typeText(text)
-        return self
-    }
-    
-    @discardableResult
-    func tapActionButton() -> NextScreenRobot {
+    func tapActionButton() -> Self {
         actionButton.tap()
-        return NextScreenRobot(app)
-    }
-    
-    // MARK: - Assertions
-    @discardableResult
-    func verifyTitle(_ expectedTitle: String) -> Self {
-        XCTAssertEqual(titleLabel.label, expectedTitle)
         return self
     }
 }
@@ -141,35 +122,32 @@ import XCTest
 
 final class FeatureNameUITests: XCTestCase {
     private var app: XCUIApplication!
-    
+
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
-        app.launchArguments = ["--uitesting"]
-        app.launch()
     }
-    
+
     override func tearDownWithError() throws {
         app = nil
     }
-    
+
     func testFeatureFlow() {
-        FeatureNameRobot(app)
-            .verifyScreenIsVisible()
-            .enterText("Test Input")
+        app.launchArguments = ["--uitesting"]
+        app.launch()
+
+        FeatureNameRobot(app: app)
+            .assertVisible()
             .tapActionButton()
-            .verifyNextScreenVisible()
     }
-    
+
     func testErrorState() {
-        // Configure app to show error state
+        app.launchArguments = ["--uitesting"]
         app.launchEnvironment["MOCK_ERROR"] = "true"
         app.launch()
-        
-        FeatureNameRobot(app)
-            .verifyScreenIsVisible()
-            .tapActionButton()
-            .verifyErrorMessageVisible()
+
+        FeatureNameRobot(app: app)
+            .assertVisible()
     }
 }
 ```
@@ -177,18 +155,18 @@ final class FeatureNameUITests: XCTestCase {
 ## Test Checklist
 
 ### Unit Tests
-- [ ] Use `@Test` macro, not `func test...()`
-- [ ] Use `#expect()` for assertions, not `XCTAssert`
-- [ ] Use `@Suite` for grouping related tests
-- [ ] Use `@MainActor` for ViewModel tests
+- [ ] Use `@Test` and `#expect`, not XCTest assertions, for unit tests
+- [ ] Import the module as `@testable import Make_Hay`
+- [ ] Use `@MainActor` when testing UI-facing ViewModels or other main-actor-isolated types
 - [ ] Create protocol-based mocks for dependencies
-- [ ] Test both success and error paths
-- [ ] Use parameterized tests where applicable
+- [ ] Test both success and failure paths
+- [ ] Cover state transitions, edge cases, and persistence behavior where relevant
+- [ ] Use parameterized tests when they improve clarity
 
 ### UI Tests
-- [ ] Implement Robot Pattern for each screen
-- [ ] Use accessibility identifiers, not text matching
-- [ ] Robots return `Self` or next Robot for fluent API
-- [ ] Keep assertions in test methods, not Robots
-- [ ] Use `waitForExistence` for async elements
-- [ ] Set up proper test data via launch arguments/environment
+- [ ] Use XCTest only for UI tests
+- [ ] Prefer the Robot Pattern for non-trivial screens and flows
+- [ ] Use accessibility identifiers, not visible text, for element lookup
+- [ ] Build launch arguments and launch environment before calling `launch()`
+- [ ] Use `waitForExistence` for async UI
+- [ ] Keep robot APIs small, readable, and reuse-oriented
