@@ -368,14 +368,22 @@ final class DashboardViewModel: GoalStatusProvider {
     
     // MARK: - Actions
     
-    /// Called when the view appears. Ensures authorization and triggers initial data load.
-    /// **Why request authorization here?** HealthKit requires explicit authorization before
-    /// queries can succeed. Requesting authorization when already granted is a no-op.
+    /// Called when the view appears. Loads goals and fetches health data.
+    ///
+    /// **Why not always request authorization?** Calling `requestAuthorization()` on
+    /// every view mount is a redundant HealthKit daemon round-trip when permission has
+    /// already been proven. We only request authorization when it hasn't been granted
+    /// yet. Subsequent foreground resumes go through `loadGoals()` directly.
     func onAppear() async {
         refreshGoalFromStorage()
         _ = try? await blockerService.applyPendingSelectionIfReady()
         startTimeTickTimer()
-        await requestAuthorizationAndLoad()
+
+        if SharedStorage.healthPermissionGranted {
+            await loadGoals()
+        } else {
+            await requestAuthorizationAndLoad()
+        }
     }
     
     /// Fetches the current day's health metrics from HealthKit.

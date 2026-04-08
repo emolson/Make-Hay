@@ -26,4 +26,16 @@ protocol BackgroundHealthMonitorProtocol: Actor {
     ///
     /// Typically called only during testing or app teardown.
     func stopMonitoring() async
+
+    /// Performs an immediate, foreground-priority evaluation of health goals and updates
+    /// Screen Time shields accordingly.
+    ///
+    /// **Why expose this?** HealthKit background delivery is throttled by iOS based on
+    /// battery, thermal state, and app-usage patterns. When the user opens the app and
+    /// taps "Refresh Sync," this method bypasses the observer cadence and fetches the
+    /// latest health data right away, ensuring shields reflect current progress.
+    ///
+    /// Uses the same evaluation pipeline as background observer callbacks so shield
+    /// decisions are always consistent.
+    func syncNow() async throws
 }

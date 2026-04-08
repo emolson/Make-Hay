@@ -76,6 +76,17 @@ private struct AppNavigationKey: EnvironmentKey {
     @MainActor static let defaultValue: AppNavigationState = AppNavigationState()
 }
 
+// MARK: - Background Health Monitor
+
+/// Environment key for the background health monitor.
+///
+/// **Why expose this?** The Settings screen needs to call `syncNow()` to trigger an
+/// immediate foreground sync. Using an environment key keeps the dependency injectable
+/// and mock-backed for previews.
+private struct BackgroundHealthMonitorKey: EnvironmentKey {
+    static let defaultValue: any BackgroundHealthMonitorProtocol = MockBackgroundHealthMonitor()
+}
+
 // MARK: - EnvironmentValues Extension
 
 extension EnvironmentValues {
@@ -124,5 +135,14 @@ extension EnvironmentValues {
     var appNavigation: AppNavigationState {
         get { self[AppNavigationKey.self] }
         set { self[AppNavigationKey.self] = newValue }
+    }
+
+    /// The background health monitor for triggering manual syncs.
+    ///
+    /// Inject at the app root: `.environment(\.backgroundHealthMonitor, container.backgroundHealthMonitor)`
+    /// Consume in any view: `@Environment(\.backgroundHealthMonitor) private var backgroundHealthMonitor`
+    var backgroundHealthMonitor: any BackgroundHealthMonitorProtocol {
+        get { self[BackgroundHealthMonitorKey.self] }
+        set { self[BackgroundHealthMonitorKey.self] = newValue }
     }
 }

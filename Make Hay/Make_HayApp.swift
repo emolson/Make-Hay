@@ -33,5 +33,6 @@ struct Make_HayApp: App {
         .environment(\.dashboardViewModel, container.dashboardViewModel)
         .environment(\.permissionManager, container.permissionManager)
         .environment(\.appNavigation, container.appNavigation)
+        .environment(\.backgroundHealthMonitor, container.backgroundHealthMonitor)
     }
 }

@@ -24,6 +24,15 @@ actor MockBackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
     /// The number of times `stopMonitoring()` has been called.
     private(set) var stopMonitoringCallCount: Int = 0
 
+    /// Whether `syncNow()` has been called.
+    private(set) var syncNowCalled: Bool = false
+
+    /// The number of times `syncNow()` has been called.
+    private(set) var syncNowCallCount: Int = 0
+
+    /// When `true`, `syncNow()` will throw an error.
+    var shouldThrowOnSync: Bool = false
+
     func startMonitoring() async {
         startMonitoringCalled = true
         startMonitoringCallCount += 1
@@ -32,5 +41,17 @@ actor MockBackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
     func stopMonitoring() async {
         stopMonitoringCalled = true
         stopMonitoringCallCount += 1
+    }
+
+    func syncNow() async throws {
+        syncNowCalled = true
+        syncNowCallCount += 1
+        if shouldThrowOnSync {
+            throw NSError(
+                domain: "MockBackgroundHealthMonitor",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Mock sync error"]
+            )
+        }
     }
 }

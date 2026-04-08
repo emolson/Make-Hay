@@ -51,6 +51,17 @@ final class PermissionManager {
     private let healthService: any HealthServiceProtocol
     private let blockerService: any BlockerServiceProtocol
 
+    /// Tracks consecutive `.unconfirmed` probe results while the previous status was
+    /// `.authorized`. A single flaky probe (daemon briefly unresponsive after an
+    /// app-switch) is tolerated; after the threshold is reached the downgrade is
+    /// accepted, which detects a real permission revocation.
+    private var consecutiveUnconfirmedCount: Int = 0
+
+    /// Number of consecutive `.unconfirmed` probes required before downgrading a
+    /// previously `.authorized` status. Low enough to detect real revocations within
+    /// a few foreground resumes, high enough to survive a single flaky daemon response.
+    private static let unconfirmedDowngradeThreshold = 2
+
     // MARK: - Initialization
 
     /// Creates a new PermissionManager backed by the given services.
@@ -97,14 +108,24 @@ final class PermissionManager {
         let latestPromptShown = await latestHealthPromptShown
         var latestHealth = (await latestHealthStatus).normalized(promptShown: latestPromptShown)
 
-        // Ratchet: once we've proven readable Health data (.authorized), don't
-        // downgrade to .unconfirmed just because a subsequent probe found no recent
-        // samples. HealthKit probes are inherently flaky — the daemon may be briefly
+        // Ratchet with revocation detection:
+        //
+        // Once we've proven readable Health data (.authorized), a single subsequent
+        // .unconfirmed probe is tolerated — the HealthKit daemon may be briefly
         // unresponsive after an app-switch (e.g. "Review Health Permissions" → Health
-        // app → back). Only a full reset (.notDetermined, meaning the prompt must be
-        // shown again) can override a previously proven authorization.
+        // app → back). However, if multiple consecutive probes return .unconfirmed,
+        // accept the downgrade: the user likely revoked access in the Health app.
+        //
+        // A full reset (.notDetermined, meaning the prompt must be shown again)
+        // always overrides immediately.
         if healthAuthorizationStatus == .authorized && latestHealth == .unconfirmed {
-            latestHealth = .authorized
+            consecutiveUnconfirmedCount += 1
+            if consecutiveUnconfirmedCount < Self.unconfirmedDowngradeThreshold {
+                latestHealth = .authorized
+            }
+            // else: threshold reached — accept the downgrade to .unconfirmed
+        } else {
+            consecutiveUnconfirmedCount = 0
         }
 
         healthAuthorizationStatus = latestHealth

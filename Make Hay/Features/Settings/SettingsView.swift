@@ -24,6 +24,9 @@ struct SettingsView: View {
     
     /// The blocker service for app selection and debug shield toggling.
     @Environment(\.blockerService) private var blockerService
+
+    /// The background health monitor for triggering a manual sync.
+    @Environment(\.backgroundHealthMonitor) private var backgroundHealthMonitor
     
     // MARK: - State
     
@@ -45,6 +48,9 @@ struct SettingsView: View {
     /// the user how to fix it manually in the Health app without falsely labeling the
     /// state as denied when readable samples are merely absent.
     @State private var showingHealthGuidance: Bool = false
+
+    /// Whether a manual health sync is currently in-flight.
+    @State private var isSyncing: Bool = false
     
     #if DEBUG
     /// Reference to the current shield update task for cancellation handling.
@@ -58,6 +64,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
+                refreshSyncSection
                 permissionsSection
                 blockedAppsSection
                 #if DEBUG
@@ -98,7 +105,45 @@ struct SettingsView: View {
     }
     
     // MARK: - Sections
-    
+
+    /// Manual sync section — gives users an explicit way to fetch the latest HealthKit
+    /// data and re-evaluate shields immediately, bypassing the OS-throttled background
+    /// delivery cadence.
+    ///
+    /// **Why above Permissions?** This is the primary recovery action when a user
+    /// completes a workout and the background delivery hasn't caught up yet.
+    @ViewBuilder
+    private var refreshSyncSection: some View {
+        Section {
+            Button {
+                performSync()
+            } label: {
+                HStack {
+                    Image(systemName: "arrow.trianglehead.2.clockwise")
+                        .font(.title2)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(String(localized: "Refresh Sync"))
+                            .font(.headline)
+                        Text(String(localized: "Fetch the latest health data and update app blocking status."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if isSyncing {
+                        ProgressView()
+                    }
+                }
+            }
+            .disabled(isSyncing)
+            .accessibilityIdentifier("refreshSyncButton")
+            .accessibilityLabel(String(localized: "Refresh Sync"))
+        } header: {
+            Text(String(localized: "Health Sync"))
+        } footer: {
+            Text(String(localized: "iOS may delay background health updates. If you've just finished a workout, tap Refresh Sync to update immediately."))
+        }
+    }
+
     /// Permissions section showing current authorization status for Health and Screen Time.
     ///
     /// **Why this section?** Users need visibility into permission states to understand
@@ -351,6 +396,27 @@ struct SettingsView: View {
 
     private func reviewHealthPermissions() {
         showingHealthGuidance = true
+    }
+
+    /// Triggers an immediate foreground sync: fetches the latest HealthKit data,
+    /// re-evaluates goals, and updates shields. Also refreshes permission state
+    /// afterward so the Permissions section reflects any changes.
+    private func performSync() {
+        Task {
+            isSyncing = true
+            defer { isSyncing = false }
+
+            do {
+                try await backgroundHealthMonitor.syncNow()
+            } catch {
+                errorMessage = error.localizedDescription
+                showingErrorAlert = true
+            }
+
+            // Always refresh permission state after a sync attempt so the
+            // Permissions section shows current status regardless of sync outcome.
+            await permissionManager.refresh()
+        }
     }
 }
 

@@ -38,6 +38,14 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
     /// Whether monitoring has been started. Prevents duplicate registration.
     private var isMonitoring: Bool = false
 
+    /// Whether an evaluation is currently in-flight. Used for coalescing.
+    private var isEvaluating: Bool = false
+
+    /// Whether another evaluation was requested while one was already running.
+    /// When true, a follow-up evaluation runs after the current one completes so the
+    /// latest health data is always reflected, without unbounded queue growth.
+    private var pendingEvaluation: Bool = false
+
     /// Logger for background health monitoring events.
     private static let logger = Logger(
         subsystem: "com.ethanolson.Make-Hay",
@@ -123,6 +131,17 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
         isMonitoring = false
     }
 
+    /// Performs an immediate, foreground-priority sync: fetches latest health data,
+    /// evaluates goals, and updates shields.
+    ///
+    /// Unlike background observer callbacks, this method throws on failure so the
+    /// caller (e.g., the Settings refresh button) can surface the error to the user.
+    func syncNow() async throws {
+        Self.logger.info("Manual sync requested.")
+        try await evaluateAndUpdateShields(throwOnFailure: true)
+        Self.logger.info("Manual sync completed successfully.")
+    }
+
     // MARK: - Private Helpers
 
     /// Registers an `HKObserverQuery` for the given sample type.
@@ -156,7 +175,7 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
             // Bridge from the callback-based HKObserverQuery into async/await.
             // The Task captures `self` weakly via the closure above.
             Task {
-                await self.evaluateAndUpdateShields()
+                await self.coalescedEvaluate()
                 completionHandler()
             }
         }
@@ -184,14 +203,43 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
         }
     }
 
+    /// Coalesces rapid observer callbacks into at most one follow-up evaluation.
+    ///
+    /// **Why coalesce?** When the user completes a workout, HealthKit may write step,
+    /// energy, and exercise samples within seconds, firing three observer callbacks.
+    /// Each would otherwise trigger a full fetch → evaluate → shield-update cycle.
+    /// This wrapper lets the first callback run immediately and defers any concurrent
+    /// requests into a single follow-up, keeping behavior responsive without wasting
+    /// the ~30-second background execution budget on redundant work.
+    private func coalescedEvaluate() async {
+        if isEvaluating {
+            pendingEvaluation = true
+            Self.logger.debug("Evaluation already in-flight — coalescing.")
+            return
+        }
+
+        isEvaluating = true
+        // Background callbacks use fail-safe mode (errors are logged, shields unchanged).
+        try? await evaluateAndUpdateShields(throwOnFailure: false)
+        isEvaluating = false
+
+        if pendingEvaluation {
+            pendingEvaluation = false
+            Self.logger.debug("Running coalesced follow-up evaluation.")
+            isEvaluating = true
+            try? await evaluateAndUpdateShields(throwOnFailure: false)
+            isEvaluating = false
+        }
+    }
+
     /// Fetches fresh health data, evaluates the user's goal configuration, and updates
     /// Screen Time shields accordingly.
     ///
-    /// **Fail-safe policy:** If any health data fetch fails, shields remain unchanged.
-    /// This prevents accidentally unblocking apps when HealthKit is temporarily unavailable
-    /// (e.g., system pressure, daemon restart), and also prevents blocking apps that were
-    /// already unblocked due to a transient error.
-    private func evaluateAndUpdateShields() async {
+    /// - Parameter throwOnFailure: When `true` (foreground/manual sync), errors propagate
+    ///   to the caller. When `false` (background observer), errors are logged and shields
+    ///   remain unchanged — the fail-safe policy that prevents accidental unblocking when
+    ///   HealthKit is temporarily unavailable.
+    private func evaluateAndUpdateShields(throwOnFailure: Bool) async throws {
         // Load the goal configuration.
         var goal = HealthGoal.load()
 
@@ -240,13 +288,13 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
             try await blockerService.updateShields(shouldBlock: shouldBlock)
 
             Self.logger.info(
-                "Background evaluation complete — shouldBlock: \(shouldBlock), steps: \(currentData.steps), energy: \(currentData.activeEnergy)"
+                "Evaluation complete — shouldBlock: \(shouldBlock), steps: \(currentData.steps), energy: \(currentData.activeEnergy)"
             )
         } catch {
-            // Fail-safe: do not change shield state on error.
             Self.logger.error(
-                "Background evaluation failed — shields unchanged: \(error.localizedDescription)"
+                "Evaluation failed — shields unchanged: \(error.localizedDescription)"
             )
+            if throwOnFailure { throw error }
         }
     }
 }

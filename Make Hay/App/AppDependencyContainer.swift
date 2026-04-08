@@ -7,6 +7,7 @@
 
 import Foundation
 import HealthKit
+import os.log
 
 /// Dependency Injection container that instantiates and holds references to all services.
 /// Injects protocols, not concrete types, to enable testability and preview support.
@@ -107,6 +108,33 @@ final class AppDependencyContainer {
         let monitor = self.backgroundHealthMonitor
         Task {
             await monitor.startMonitoring()
+        }
+
+        // Validate App Group wiring early so misconfigured entitlements fail loudly
+        // during development instead of silently desyncing cross-process state.
+        Self.validateAppGroupConfiguration()
+    }
+
+    // MARK: - Private
+
+    private static let logger = Logger(
+        subsystem: "com.ethanolson.Make-Hay",
+        category: "AppDependencyContainer"
+    )
+
+    /// One-time sanity check that the App Group container and UserDefaults suite are
+    /// both reachable. Logs a fault and asserts in debug builds if either is missing.
+    private static func validateAppGroupConfiguration() {
+        let id = SharedStorage.appGroupIdentifier
+
+        if UserDefaults(suiteName: id) == nil {
+            logger.fault("App Group UserDefaults suite '\(id)' unavailable at launch.")
+            assertionFailure("App Group UserDefaults suite '\(id)' is nil — check entitlements.")
+        }
+
+        if FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: id) == nil {
+            logger.fault("App Group container URL for '\(id)' unavailable at launch.")
+            assertionFailure("App Group container URL for '\(id)' is nil — check entitlements.")
         }
     }
 }

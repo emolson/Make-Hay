@@ -6,22 +6,53 @@
 //
 
 import Foundation
+import os.log
 
 /// Shared storage configuration used by the app and app extensions.
 enum SharedStorage {
     /// App Group identifier used for cross-process persistence.
     nonisolated static let appGroupIdentifier: String = "group.ethanolson.Make-Hay"
 
+    private nonisolated static let logger = Logger(
+        subsystem: "com.ethanolson.Make-Hay",
+        category: "SharedStorage"
+    )
+
     /// Shared UserDefaults suite for cross-process state (for example, `HealthGoal`).
+    ///
+    /// **Why assert instead of silently falling back?** The app and its extensions
+    /// share goal and permission state through App Group UserDefaults. If the suite
+    /// cannot be created (misconfigured entitlements, wrong identifier), falling back
+    /// to `.standard` silently desyncs the two processes — goals saved by the app
+    /// won't be visible to the extension and vice-versa. The assertion catches this
+    /// during development; in production the fallback keeps the app running.
     nonisolated static var appGroupDefaults: UserDefaults {
-        UserDefaults(suiteName: appGroupIdentifier) ?? .standard
+        guard let defaults = UserDefaults(suiteName: appGroupIdentifier) else {
+            logger.fault(
+                "App Group UserDefaults suite '\(appGroupIdentifier)' unavailable — falling back to .standard. Check entitlements."
+            )
+            assertionFailure(
+                "App Group UserDefaults suite '\(appGroupIdentifier)' is nil. Verify the App Group entitlement is configured for this target."
+            )
+            return .standard
+        }
+        return defaults
     }
 
     /// Shared container root URL for file-based payloads.
     nonisolated static var appGroupContainerURL: URL? {
-        FileManager.default.containerURL(
+        let url = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: appGroupIdentifier
         )
+        if url == nil {
+            logger.fault(
+                "App Group container URL for '\(appGroupIdentifier)' is nil. Check entitlements."
+            )
+            assertionFailure(
+                "App Group container URL for '\(appGroupIdentifier)' is nil. Verify the App Group entitlement is configured for this target."
+            )
+        }
+        return url
     }
 
     nonisolated static var familyActivitySelectionURL: URL? {

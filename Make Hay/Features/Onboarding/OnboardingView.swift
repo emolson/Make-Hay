@@ -121,28 +121,38 @@ private struct WelcomeStepView: View {
     let onContinue: () -> Void
     
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 0) {
             Spacer()
             
-            Image(systemName: "sun.max.fill")
-                .font(.system(size: 80))
-                .foregroundStyle(Color.onboardingWelcome)
-                .accessibilityIdentifier("welcomeIcon")
-            
-            VStack(spacing: 8) {
-                Text(String(localized: "Move More"))
-                Text(String(localized: "Scroll Less"))
-                Text(String(localized: "Make Every Day Count"))
+            // Hero Graphic with Depth and Motion
+            ZStack {
+                Circle()
+                    .fill(Color.onboardingWelcome.opacity(0.15))
+                    .frame(width: 160, height: 160)
+                
+                Image(systemName: "sun.max.fill")
+                    .font(.system(size: 80))
+                    .symbolRenderingMode(.multicolor)
+                    .foregroundStyle(Color.onboardingWelcome)
+                    .symbolEffect(.breathe, options: .repeating)
+                    .shadow(color: Color.onboardingWelcome.opacity(0.3), radius: 10, y: 5)
+                    .accessibilityIdentifier("welcomeIcon")
             }
-            .font(.largeTitle)
-            .fontWeight(.bold)
-            .multilineTextAlignment(.center)
+            .padding(.bottom, 48)
             
-            Text(String(localized: "Make Hay blocks your apps until your fitness goals are met."))
-                .font(.title3)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
+            // Stacked Typography Hierarchy
+            VStack(spacing: 12) {
+                Text(String(localized: "Move More.\nScroll Less."))
+                    .font(.system(.largeTitle, design: .rounded, weight: .black))
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(4)
+                
+                Text(String(localized: "Make every day count. Make Hay blocks your apps until your fitness goals are met."))
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+            }
             
             Spacer()
             
@@ -153,7 +163,7 @@ private struct WelcomeStepView: View {
             .accessibilityIdentifier("welcomeContinueButton")
             
             Spacer()
-                .frame(height: 60)
+                .frame(height: 40)
         }
         .padding()
     }
@@ -999,14 +1009,16 @@ private struct OnboardingButton: View {
                         .progressViewStyle(CircularProgressViewStyle(tint: Color.onboardingButtonContent))
                 } else {
                     Text(title)
-                        .font(.headline)
+                        .font(.title3)
+                        .fontWeight(.bold)
                 }
             }
             .frame(maxWidth: .infinity)
-            .padding()
+            .frame(height: 56)
             .background(Color.accentColor)
             .foregroundStyle(Color.onboardingButtonContent)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .shadow(color: Color.accentColor.opacity(0.3), radius: 8, y: 4)
         }
         .disabled(isLoading)
         .padding(.horizontal, 24)
@@ -1021,12 +1033,13 @@ private struct SecondaryOnboardingButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.headline)
+                .font(.title3)
+                .fontWeight(.semibold)
                 .frame(maxWidth: .infinity)
-                .padding()
+                .frame(height: 56)
                 .background(Color.onboardingSecondaryBackground)
                 .foregroundStyle(Color.onboardingSecondaryContent)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
         }
         .padding(.horizontal, 24)
     }
