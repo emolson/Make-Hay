@@ -41,6 +41,9 @@ enum SharedStorage {
     /// Key used to persist whether HealthKit authorization was granted during onboarding.
     private nonisolated static let healthPermissionGrantedKey = "healthPermissionGranted"
 
+    /// Key used to persist whether the HealthKit permission sheet has already been shown.
+    private nonisolated static let healthAuthorizationPromptShownKey = "healthAuthorizationPromptShown"
+
     /// Key used to persist whether Screen Time authorization was granted during onboarding.
     private nonisolated static let screenTimePermissionGrantedKey = "screenTimePermissionGranted"
 
@@ -52,6 +55,16 @@ enum SharedStorage {
     nonisolated static var healthPermissionGranted: Bool {
         get { appGroupDefaults.bool(forKey: healthPermissionGrantedKey) }
         set { appGroupDefaults.set(newValue, forKey: healthPermissionGrantedKey) }
+    }
+
+    /// Whether the app has already consumed HealthKit's one-time authorization sheet.
+    ///
+    /// **Why persist this separately?** Read-only HealthKit permissions cannot always be
+    /// distinguished from "no readable samples yet." This flag preserves the recovery UI
+    /// path without falsely reporting denied access when the user simply has no recent data.
+    nonisolated static var healthAuthorizationPromptShown: Bool {
+        get { appGroupDefaults.bool(forKey: healthAuthorizationPromptShownKey) }
+        set { appGroupDefaults.set(newValue, forKey: healthAuthorizationPromptShownKey) }
     }
 
     /// Whether Screen Time permission was granted during onboarding.

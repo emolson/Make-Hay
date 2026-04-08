@@ -537,11 +537,11 @@ enum GoalGatekeeper {
 
 /// Configuration for a steps goal.
 struct StepGoal: Codable, Sendable, Equatable {
-    var isEnabled: Bool = true
+    var isEnabled: Bool = false
     var target: Int = 8_000
     var schedule: GoalSchedule = .everyDay
 
-    nonisolated init(isEnabled: Bool = true, target: Int = 8_000, schedule: GoalSchedule = .everyDay) {
+    nonisolated init(isEnabled: Bool = false, target: Int = 8_000, schedule: GoalSchedule = .everyDay) {
         self.isEnabled = isEnabled
         self.target = target
         self.schedule = schedule

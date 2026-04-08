@@ -18,6 +18,9 @@ struct SettingsView: View {
     /// between this view and `DashboardViewModel`. Mock-backed default keeps previews
     /// zero-config.
     @Environment(\.permissionManager) private var permissionManager
+
+    /// SwiftUI environment action for opening the app's Settings page.
+    @Environment(\.openURL) private var openURL
     
     /// The blocker service for app selection and debug shield toggling.
     @Environment(\.blockerService) private var blockerService
@@ -32,9 +35,16 @@ struct SettingsView: View {
     
     /// Tracks any error message to display in an alert.
     @State private var errorMessage: String?
-    
+
     /// Tracks whether the error alert is shown.
     @State private var showingErrorAlert: Bool = false
+
+    /// Tracks whether the Health manual guidance alert is shown.
+    /// **Why a separate alert?** When HealthKit's system prompt has already been presented
+    /// once, calling `requestAuthorization()` may silently do nothing. This alert tells
+    /// the user how to fix it manually in the Health app without falsely labeling the
+    /// state as denied when readable samples are merely absent.
+    @State private var showingHealthGuidance: Bool = false
     
     #if DEBUG
     /// Reference to the current shield update task for cancellation handling.
@@ -48,8 +58,8 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
-                blockedAppsSection
                 permissionsSection
+                blockedAppsSection
                 #if DEBUG
                 debugSection
                 #endif
@@ -70,6 +80,19 @@ struct SettingsView: View {
                 if let errorMessage {
                     Text(errorMessage)
                 }
+            }
+            .alert(
+                String(localized: "Enable Health Access"),
+                isPresented: $showingHealthGuidance
+            ) {
+                Button(String(localized: "Open Health App")) {
+                    if let url = URL(string: "x-apple-health://") {
+                        openURL(url)
+                    }
+                }
+                Button(String(localized: "Cancel"), role: .cancel) { }
+            } message: {
+                Text(String(localized: "The Health permission prompt can only be shown once. To grant access, open the Health app -> tap your profile (top right) -> Apps & Services -> Make Hay -> turn on all categories."))
             }
         }
     }
@@ -101,19 +124,10 @@ struct SettingsView: View {
                 
                 Spacer()
                 
-                if permissionManager.healthAuthorizationStatus != .authorized {
-                    Button(String(localized: "Request")) {
-                        Task {
-                            do {
-                                try await permissionManager.requestHealthPermission()
-                            } catch {
-                                errorMessage = error.localizedDescription
-                                showingErrorAlert = true
-                            }
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier("requestHealthButton")
+                if permissionManager.healthAuthorizationStatus == .notDetermined {
+                    Button(String(localized: "Request"), action: requestHealthAccess)
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("requestHealthButton")
                 }
             }
             .accessibilityIdentifier("healthPermissionRow")
@@ -154,9 +168,7 @@ struct SettingsView: View {
             
             // Open Settings Button
             Button {
-                if let url = URL(string: UIApplication.openSettingsURLString) {
-                    UIApplication.shared.open(url)
-                }
+                openAppSettings()
             } label: {
                 HStack {
                     Image(systemName: "gear")
@@ -164,6 +176,14 @@ struct SettingsView: View {
                 }
             }
             .accessibilityIdentifier("openSettingsButton")
+
+            Button(action: reviewHealthPermissions) {
+                HStack {
+                    Image(systemName: "heart.text.square")
+                    Text(String(localized: "Review Health Permissions"))
+                }
+            }
+            .accessibilityIdentifier("reviewHealthPermissionsButton")
         } header: {
             Text(String(localized: "Permissions"))
         } footer: {
@@ -248,6 +268,8 @@ struct SettingsView: View {
         switch permissionManager.healthAuthorizationStatus {
         case .authorized:
             return "checkmark.circle.fill"
+        case .unconfirmed:
+            return "exclamationmark.circle.fill"
         case .denied:
             return "xmark.circle.fill"
         case .notDetermined:
@@ -259,6 +281,8 @@ struct SettingsView: View {
         switch permissionManager.healthAuthorizationStatus {
         case .authorized:
             return .statusSuccess
+        case .unconfirmed:
+            return .statusWarning
         case .denied:
             return .statusError
         case .notDetermined:
@@ -270,6 +294,8 @@ struct SettingsView: View {
         switch permissionManager.healthAuthorizationStatus {
         case .authorized:
             return String(localized: "Access granted to read health data")
+        case .unconfirmed:
+            return String(localized: "Permission requested - review the Health app if tracking does not start")
         case .denied:
             return String(localized: "Access denied - check Settings")
         case .notDetermined:
@@ -291,6 +317,40 @@ struct SettingsView: View {
         permissionManager.screenTimeAuthorized
             ? String(localized: "Family Controls authorized")
             : String(localized: "Not authorized - app blocking unavailable")
+    }
+
+    private func openAppSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        openURL(url)
+    }
+
+    /// Attempts to show the HealthKit permission prompt. If the prompt has already been
+    /// shown without proven authorization, shows manual guidance instead, since HealthKit
+    /// only presents its sheet once per type set.
+    private func requestHealthAccess() {
+        Task {
+            await permissionManager.refresh()
+
+            guard permissionManager.healthAuthorizationStatus == .notDetermined,
+                  !permissionManager.healthAuthorizationPromptShown else {
+                showingHealthGuidance = true
+                return
+            }
+
+            do {
+                let status = try await permissionManager.requestHealthPermission()
+                if status == .unconfirmed {
+                    showingHealthGuidance = true
+                }
+            } catch {
+                errorMessage = error.localizedDescription
+                showingErrorAlert = true
+            }
+        }
+    }
+
+    private func reviewHealthPermissions() {
+        showingHealthGuidance = true
     }
 }
 

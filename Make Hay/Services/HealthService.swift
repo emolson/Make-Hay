@@ -23,26 +23,11 @@ actor HealthService: HealthServiceProtocol {
     private let exerciseTimeType: HKQuantityType
     private let workoutType: HKWorkoutType
     
-    /// Injected key-value store used for lightweight persistence.
-    ///
-    /// **Why injected?** `HealthService` only needs a single persisted flag
-    /// (`hasRequestedHealthAuthorization`). Coupling directly to `UserDefaults.standard`
-    /// makes unit tests hit real disk defaults, introducing flakiness. Injecting a
-    /// `KeyValueStorage` protocol lets tests supply an in-memory stub instead.
-    private let storage: any KeyValueStorage
-
-    /// Key used to persist the authorization-requested flag.
-    private static let authRequestedKey = "hasRequestedHealthAuthorization"
-
-    /// Tracks whether authorization was successfully requested.
-    /// **Why persisted?** HealthKit doesn't expose a clear "authorized" status for read-only
-    /// types due to privacy. We track successful authorization requests ourselves. This flag
-    /// must survive app restarts, otherwise `authorizationStatus` incorrectly reports
-    /// `.notDetermined` on every launch (since HealthKit returns `.sharingDenied` for
-    /// read-only grants due to privacy).
-    private var hasRequestedAuthorization: Bool {
-        get { storage.bool(forKey: Self.authRequestedKey) }
-        set { storage.set(newValue, forKey: Self.authRequestedKey) }
+    /// The full set of types the app requests read access for.
+    /// Computed once and cached so `authorizationStatus` and `requestAuthorization`
+    /// always agree on the exact type set.
+    private var typesToRead: Set<HKObjectType> {
+        [stepType, activeEnergyType, exerciseTimeType, workoutType]
     }
     
     /// Maximum time to wait for a single HealthKit query before treating it as failed.
@@ -57,13 +42,12 @@ actor HealthService: HealthServiceProtocol {
     /// Creates a new HealthService instance.
     /// - Parameters:
     ///   - healthStore: An optional shared `HKHealthStore`. If nil, a new store is created.
-    ///   - storage: Key-value store for persisting lightweight flags. Defaults to `UserDefaults.standard`.
     /// - Throws: `HealthServiceError.healthKitNotAvailable` if HealthKit is not available on this device.
     ///
     /// **Why accept an external store?** Apple recommends a single `HKHealthStore` per app.
     /// Sharing the store with `BackgroundHealthMonitor` avoids duplicate connections to the
     /// HealthKit daemon and keeps observer query registration consistent.
-    init(healthStore: HKHealthStore? = nil, storage: any KeyValueStorage = UserDefaults.standard) throws {
+    init(healthStore: HKHealthStore? = nil) throws {
         guard HKHealthStore.isHealthDataAvailable() else {
             throw HealthServiceError.healthKitNotAvailable
         }
@@ -78,7 +62,6 @@ actor HealthService: HealthServiceProtocol {
         }
         
         self.healthStore = healthStore ?? HKHealthStore()
-        self.storage = storage
         self.stepType = stepType
         self.activeEnergyType = activeEnergyType
         self.exerciseTimeType = exerciseTimeType
@@ -87,41 +70,126 @@ actor HealthService: HealthServiceProtocol {
     
     // MARK: - HealthServiceProtocol
     
-    /// Returns the current HealthKit authorization status for step data.
+    /// Returns the current HealthKit authorization status for health data.
     ///
-    /// **Why this approach?** HealthKit doesn't expose a clear "authorized" status for read-only types
-    /// due to privacy. We check if we've successfully requested authorization and fall back to
-    /// the native status for determining if it's not determined.
+    /// **Why `statusForAuthorizationRequest`?** Apple's `authorizationStatus(for:)` only
+    /// reflects *write* permission. For read-only types it always returns `.sharingDenied`
+    /// regardless of whether the user granted read access — Apple intentionally hides read
+    /// grants for privacy. The request-status API tells us whether the permission sheet
+    /// would still appear (`.shouldRequest`) or has already been presented (`.unnecessary`).
+    ///
+    /// **Post-prompt verification:** Once the sheet has been shown, we do a lightweight
+    /// probe across the requested sample types to detect whether readable data is
+    /// actually flowing. A successful read proves `.authorized`; no readable samples is
+    /// treated as inconclusive and remains `.unconfirmed` rather than a false denial.
     var authorizationStatus: HealthAuthorizationStatus {
-        let status = healthStore.authorizationStatus(for: stepType)
-        
-        switch status {
-        case .notDetermined:
-            return .notDetermined
-        case .sharingDenied:
-            // For read-only access, this could mean authorized OR denied (privacy)
-            // We use our internal tracking to determine the actual state
-            return hasRequestedAuthorization ? .authorized : .notDetermined
-        case .sharingAuthorized:
-            return .authorized
-        @unknown default:
-            return .notDetermined
+        get async {
+            do {
+                let requestStatus = try await authorizationRequestStatus()
+                switch requestStatus {
+                case .shouldRequest:
+                    // The user has never been prompted for these types.
+                    return .notDetermined
+                case .unnecessary:
+                    // The prompt has already been shown. Probe for proven readable data
+                    // because HealthKit hides whether read-only permission was granted.
+                    let hasAccess = await probeHealthDataAccess()
+                    return hasAccess ? .authorized : .unconfirmed
+                case .unknown:
+                    return .notDetermined
+                @unknown default:
+                    return .notDetermined
+                }
+            } catch {
+                return .notDetermined
+            }
+        }
+    }
+
+    var authorizationPromptShown: Bool {
+        get async {
+            do {
+                let requestStatus = try await authorizationRequestStatus()
+                switch requestStatus {
+                case .unnecessary:
+                    return true
+                case .shouldRequest, .unknown:
+                    return false
+                @unknown default:
+                    return false
+                }
+            } catch {
+                return false
+            }
         }
     }
     
-    /// Requests authorization to read step count data from HealthKit.
-    /// - Throws: `HealthServiceError.authorizationDenied` if the user denies access.
+    /// Requests authorization to read health data from HealthKit.
+    /// - Throws: `HealthServiceError.authorizationDenied` if the request fails.
+    ///
+    /// **Why no local flag?** The previous implementation set a persisted
+    /// `hasRequestedAuthorization` flag here and used it as a proxy for read access.
+    /// That was incorrect — Apple's docs explicitly state the success return value
+    /// only indicates the request completed, not that the user granted permission.
+    /// The corrected `authorizationStatus` now queries HealthKit directly instead.
     func requestAuthorization() async throws {
-        let typesToRead: Set<HKSampleType> = [stepType, activeEnergyType, exerciseTimeType, workoutType]
-        
         do {
             try await healthStore.requestAuthorization(toShare: [], read: typesToRead)
-            hasRequestedAuthorization = true
         } catch {
             throw HealthServiceError.authorizationDenied
         }
     }
     
+    // MARK: - Private Helpers
+
+    /// Attempts lightweight reads across the requested HealthKit types.
+    ///
+    /// **Why a probe?** After the permission sheet is dismissed, HealthKit's request-status
+    /// API only tells us the prompt was shown, not whether the user toggled any types on.
+    /// A non-zero quantity or existing workout proves read access; the absence of readable
+    /// samples remains ambiguous, so we do not map it to denied.
+    ///
+    /// **Why 7 days?** Using only today's data would produce false negatives every morning
+    /// before the user starts moving. A 7-day window reduces that, while still keeping the
+    /// query bounded and fast.
+    private func probeHealthDataAccess() async -> Bool {
+        let now = Date()
+        let sevenDaysAgo = Calendar.current.date(byAdding: .day, value: -7, to: now) ?? now
+        async let stepsReadable = recentQuantityDataExists(
+            for: stepType,
+            unit: .count(),
+            start: sevenDaysAgo,
+            end: now
+        )
+        async let activeEnergyReadable = recentQuantityDataExists(
+            for: activeEnergyType,
+            unit: .kilocalorie(),
+            start: sevenDaysAgo,
+            end: now
+        )
+        async let exerciseReadable = recentQuantityDataExists(
+            for: exerciseTimeType,
+            unit: .minute(),
+            start: sevenDaysAgo,
+            end: now
+        )
+        async let workoutReadable = recentWorkoutDataExists(
+            start: sevenDaysAgo,
+            end: now
+        )
+
+        let readabilityChecks = await [
+            stepsReadable,
+            activeEnergyReadable,
+            exerciseReadable,
+            workoutReadable,
+        ]
+
+        return readabilityChecks.contains(true)
+    }
+
+    // MARK: - Data Fetching
+
     /// Fetches the total step count for the current day using HKStatisticsQuery.
     /// - Returns: The cumulative step count from midnight to now.
     /// - Throws: `HealthServiceError.queryFailed` if the query encounters an error.
@@ -305,6 +373,87 @@ actor HealthService: HealthServiceProtocol {
             }
             group.cancelAll()
             return result
+        }
+    }
+
+    private func authorizationRequestStatus() async throws -> HKAuthorizationRequestStatus {
+        try await healthStore.statusForAuthorizationRequest(
+            toShare: [],
+            read: typesToRead
+        )
+    }
+
+    private func recentQuantityDataExists(
+        for quantityType: HKQuantityType,
+        unit: HKUnit,
+        start: Date,
+        end: Date
+    ) async -> Bool {
+        let localStore = healthStore
+
+        do {
+            let total = try await withThrowingTimeout(seconds: Self.queryTimeoutSeconds) {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Double, Error>) in
+                    let predicate = HKQuery.predicateForSamples(
+                        withStart: start,
+                        end: end,
+                        options: .strictStartDate
+                    )
+                    let query = HKStatisticsQuery(
+                        quantityType: quantityType,
+                        quantitySamplePredicate: predicate,
+                        options: .cumulativeSum
+                    ) { _, statistics, error in
+                        if let error {
+                            continuation.resume(throwing: error)
+                            return
+                        }
+
+                        let sum = statistics?.sumQuantity()?.doubleValue(for: unit) ?? 0
+                        continuation.resume(returning: sum)
+                    }
+
+                    localStore.execute(query)
+                }
+            }
+
+            return total > 0
+        } catch {
+            return false
+        }
+    }
+
+    private func recentWorkoutDataExists(start: Date, end: Date) async -> Bool {
+        let localWorkoutType = workoutType
+        let localStore = healthStore
+
+        do {
+            return try await withThrowingTimeout(seconds: Self.queryTimeoutSeconds) {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
+                    let predicate = HKQuery.predicateForSamples(
+                        withStart: start,
+                        end: end,
+                        options: .strictStartDate
+                    )
+                    let query = HKSampleQuery(
+                        sampleType: localWorkoutType,
+                        predicate: predicate,
+                        limit: 1,
+                        sortDescriptors: nil
+                    ) { _, samples, error in
+                        if let error {
+                            continuation.resume(throwing: error)
+                            return
+                        }
+
+                        continuation.resume(returning: (samples?.isEmpty == false))
+                    }
+
+                    localStore.execute(query)
+                }
+            }
+        } catch {
+            return false
         }
     }
 }

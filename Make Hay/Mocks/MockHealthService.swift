@@ -20,6 +20,9 @@ actor MockHealthService: HealthServiceProtocol {
     
     /// Mock authorization status.
     var mockAuthorizationStatus: HealthAuthorizationStatus = .authorized
+
+    /// Whether the mock should report the HealthKit sheet as already shown.
+    var mockAuthorizationPromptShown: Bool = false
     
     /// When `true`, all methods will throw their respective errors.
     var shouldThrowError: Bool = false
@@ -40,7 +43,11 @@ actor MockHealthService: HealthServiceProtocol {
     
     /// Returns the mock authorization status.
     var authorizationStatus: HealthAuthorizationStatus {
-        mockAuthorizationStatus
+        get async { mockAuthorizationStatus }
+    }
+
+    var authorizationPromptShown: Bool {
+        get async { mockAuthorizationPromptShown || mockAuthorizationStatus.promptHasBeenShown }
     }
     
     /// Simulates requesting HealthKit authorization.
@@ -49,6 +56,8 @@ actor MockHealthService: HealthServiceProtocol {
         if shouldThrowError {
             throw HealthServiceError.authorizationDenied
         }
+
+        mockAuthorizationPromptShown = true
     }
     
     /// Returns the configured `mockSteps` value or throws an error.
@@ -143,5 +152,11 @@ actor MockHealthService: HealthServiceProtocol {
     /// - Parameter status: The status to report.
     func setMockAuthorizationStatus(_ status: HealthAuthorizationStatus) {
         mockAuthorizationStatus = status
+    }
+
+    /// Configures whether the mock should report the HealthKit sheet as already shown.
+    /// - Parameter shown: The prompt-shown state to report.
+    func setMockAuthorizationPromptShown(_ shown: Bool) {
+        mockAuthorizationPromptShown = shown
     }
 }

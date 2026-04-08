@@ -15,12 +15,40 @@ import Foundation
 enum HealthAuthorizationStatus: Sendable {
     /// Authorization has not been requested yet.
     case notDetermined
+
+    /// The HealthKit sheet has been shown, but readable data is not yet proven.
+    case unconfirmed
     
     /// The user authorized access to health data.
     case authorized
     
     /// The user denied access or authorization is not possible.
     case denied
+
+    /// Whether the app has verified readable Health data.
+    var isAuthorized: Bool {
+        self == .authorized
+    }
+
+    /// Whether the one-time HealthKit sheet has already been consumed.
+    var promptHasBeenShown: Bool {
+        switch self {
+        case .notDetermined:
+            false
+        case .unconfirmed, .authorized, .denied:
+            true
+        }
+    }
+
+    /// Normalizes stale storage or mock states where the prompt was shown but access
+    /// is still reported as `.notDetermined`.
+    func normalized(promptShown: Bool) -> Self {
+        if promptShown && self == .notDetermined {
+            return .unconfirmed
+        }
+
+        return self
+    }
 }
 
 /// Errors that can occur during HealthKit operations.

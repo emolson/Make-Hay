@@ -32,5 +32,6 @@ struct Make_HayApp: App {
         .environment(\.blockerService, container.blockerService)
         .environment(\.dashboardViewModel, container.dashboardViewModel)
         .environment(\.permissionManager, container.permissionManager)
+        .environment(\.appNavigation, container.appNavigation)
     }
 }

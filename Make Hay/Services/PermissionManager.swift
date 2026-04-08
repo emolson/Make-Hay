@@ -32,6 +32,9 @@ final class PermissionManager {
     /// Current HealthKit authorization status, refreshed on every `refresh()` call.
     var healthAuthorizationStatus: HealthAuthorizationStatus
 
+    /// Whether the one-time HealthKit authorization sheet has already been shown.
+    var healthAuthorizationPromptShown: Bool
+
     /// Current Screen Time (FamilyControls) authorization status.
     var screenTimeAuthorized: Bool
 
@@ -67,10 +70,15 @@ final class PermissionManager {
         self.healthService = healthService
         self.blockerService = blockerService
 
-        // Seed from persisted state for a flicker-free first frame.
-        self.healthAuthorizationStatus = SharedStorage.healthPermissionGranted
+        let seededPromptShown = SharedStorage.healthAuthorizationPromptShown
+            || SharedStorage.healthPermissionGranted
+        let seededHealthStatus: HealthAuthorizationStatus = SharedStorage.healthPermissionGranted
             ? .authorized
             : .notDetermined
+
+        // Seed from persisted state for a flicker-free first frame.
+        self.healthAuthorizationStatus = seededHealthStatus.normalized(promptShown: seededPromptShown)
+        self.healthAuthorizationPromptShown = seededPromptShown
         self.screenTimeAuthorized = SharedStorage.screenTimePermissionGranted
     }
 
@@ -82,23 +90,48 @@ final class PermissionManager {
     /// **Why a dedicated method?** Called on view appear *and* on every foreground resume
     /// so the banner reacts within one frame if the user toggled permissions in Settings.
     func refresh() async {
-        let latestHealth = await healthService.authorizationStatus
+        async let latestHealthStatus = healthService.authorizationStatus
+        async let latestHealthPromptShown = healthService.authorizationPromptShown
         let latestScreenTime = await blockerService.isAuthorized
 
+        let latestPromptShown = await latestHealthPromptShown
+        var latestHealth = (await latestHealthStatus).normalized(promptShown: latestPromptShown)
+
+        // Ratchet: once we've proven readable Health data (.authorized), don't
+        // downgrade to .unconfirmed just because a subsequent probe found no recent
+        // samples. HealthKit probes are inherently flaky — the daemon may be briefly
+        // unresponsive after an app-switch (e.g. "Review Health Permissions" → Health
+        // app → back). Only a full reset (.notDetermined, meaning the prompt must be
+        // shown again) can override a previously proven authorization.
+        if healthAuthorizationStatus == .authorized && latestHealth == .unconfirmed {
+            latestHealth = .authorized
+        }
+
         healthAuthorizationStatus = latestHealth
+        healthAuthorizationPromptShown = latestPromptShown || latestHealth.promptHasBeenShown
         screenTimeAuthorized = latestScreenTime
 
         // Persist so the next cold-launch seeds the correct initial state.
-        SharedStorage.healthPermissionGranted = (latestHealth == .authorized)
+        SharedStorage.healthPermissionGranted = latestHealth.isAuthorized
+        SharedStorage.healthAuthorizationPromptShown = healthAuthorizationPromptShown
         SharedStorage.screenTimePermissionGranted = latestScreenTime
     }
 
-    /// Requests HealthKit authorization and refreshes the stored status.
+    /// Requests HealthKit authorization, refreshes stored state, and returns the
+    /// resulting authorization status.
     ///
+    /// **Why return a status?** HealthKit may complete the request call without
+    /// presenting UI or granting access. Callers need the post-request status so
+    /// they can distinguish a real grant from the "still denied" case and show
+    /// the correct manual guidance.
+    ///
+    /// - Returns: The latest HealthKit authorization status after refresh.
     /// - Throws: Propagates any error from the underlying `HealthServiceProtocol`.
-    func requestHealthPermission() async throws {
+    @discardableResult
+    func requestHealthPermission() async throws -> HealthAuthorizationStatus {
         try await healthService.requestAuthorization()
         await refresh()
+        return healthAuthorizationStatus
     }
 
     /// Requests Screen Time (FamilyControls) authorization and refreshes the stored status.

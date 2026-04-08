@@ -14,10 +14,19 @@ import SwiftUI
 /// a custom `EnvironmentKey`, so this view no longer couples to `AppDependencyContainer`.
 /// Child views read their own dependencies from the environment — no manual threading.
 struct MainTabView: View {
+
+    /// Shared root tab selection state.
+    /// **Why environment-backed?** This lets child views switch tabs without the app
+    /// root manually threading bindings through every intermediate view.
+    @Environment(\.appNavigation) private var appNavigation
     
     var body: some View {
-        TabView {
+        TabView(selection: Binding(
+            get: { appNavigation.selectedTab },
+            set: { appNavigation.selectedTab = $0 }
+        )) {
             DashboardView()
+            .tag(AppTab.dashboard)
             .tabItem {
                 Label(
                     String(localized: "Dashboard"),
@@ -27,6 +36,7 @@ struct MainTabView: View {
             .accessibilityIdentifier("dashboardTab")
             
             SettingsView()
+                .tag(AppTab.settings)
                 .tabItem {
                     Label(
                         String(localized: "Settings"),

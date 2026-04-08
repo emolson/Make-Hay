@@ -16,17 +16,16 @@ import SwiftUI
 /// obvious and provides a one-tap path to fix it.
 struct PermissionsBannerView: View {
 
-    /// SwiftUI environment action for opening URLs.
-    /// **Why `@Environment` instead of `UIApplication.shared`?** Keeps the view
-    /// purely declarative with no UIKit dependency, and makes the action injectable
-    /// in tests and previews.
-    @Environment(\.openURL) private var openURL
-
     /// Current HealthKit authorization status.
     let healthStatus: HealthAuthorizationStatus
 
     /// Whether Screen Time (FamilyControls) is currently authorized.
     let screenTimeAuthorized: Bool
+
+    /// Action that routes the user to the permission recovery screen.
+    /// **Why a closure?** The banner stays presentation-focused while the parent view
+    /// decides where permission recovery lives in the current app architecture.
+    let onOpenSettings: () -> Void
 
     // MARK: - Body
 
@@ -49,10 +48,8 @@ struct PermissionsBannerView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            // Deep-link to the app's Settings page so the user can fix it.
             Button {
-                guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-                openURL(url)
+                onOpenSettings()
             } label: {
                 Text(String(localized: "Open Settings"))
                     .font(.subheadline)
@@ -80,17 +77,23 @@ struct PermissionsBannerView: View {
     /// **Why computed?** Keeps the `body` lean and makes the logic easily testable
     /// if extracted to a ViewModel later.
     private var detailText: String {
-        let healthMissing = healthStatus != .authorized
+        let healthMissing = healthStatus == .notDetermined || healthStatus == .denied
+        let healthUnconfirmed = healthStatus == .unconfirmed
         let screenTimeMissing = !screenTimeAuthorized
 
-        if healthMissing && screenTimeMissing {
+        if healthUnconfirmed && screenTimeMissing {
+            return String(localized: "Screen Time still needs approval, and Apple Health access has not been confirmed yet.")
+        } else if healthMissing && screenTimeMissing {
             return String(localized: "Turn on Apple Health to track goals and Screen Time to block apps.")
+        } else if healthUnconfirmed {
+            return String(localized: "Apple Health access was requested, but Make Hay has not confirmed readable data yet.")
         } else if healthMissing {
             return String(localized: "Turn on Apple Health to track your health goals.")
         } else {
             return String(localized: "Turn on Screen Time to block apps until you hit your goals.")
         }
     }
+
 }
 
 // MARK: - Preview
@@ -98,7 +101,8 @@ struct PermissionsBannerView: View {
 #Preview("Both Missing") {
     PermissionsBannerView(
         healthStatus: .denied,
-        screenTimeAuthorized: false
+        screenTimeAuthorized: false,
+        onOpenSettings: { }
     )
     .padding()
 }
@@ -106,7 +110,8 @@ struct PermissionsBannerView: View {
 #Preview("Health Missing") {
     PermissionsBannerView(
         healthStatus: .denied,
-        screenTimeAuthorized: true
+        screenTimeAuthorized: true,
+        onOpenSettings: { }
     )
     .padding()
 }
@@ -114,7 +119,8 @@ struct PermissionsBannerView: View {
 #Preview("Screen Time Missing") {
     PermissionsBannerView(
         healthStatus: .authorized,
-        screenTimeAuthorized: false
+        screenTimeAuthorized: false,
+        onOpenSettings: { }
     )
     .padding()
 }

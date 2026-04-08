@@ -420,6 +420,10 @@ final class DashboardViewModel: GoalStatusProvider {
         
         do {
             try await healthService.requestAuthorization()
+            let promptShown = await healthService.authorizationPromptShown
+            let authorizationStatus = (await healthService.authorizationStatus).normalized(promptShown: promptShown)
+            SharedStorage.healthPermissionGranted = authorizationStatus.isAuthorized
+            SharedStorage.healthAuthorizationPromptShown = promptShown || authorizationStatus.promptHasBeenShown
             refreshGoalFromStorage()
             _ = try? await blockerService.applyPendingSelectionIfReady()
             let results = try await fetchEnabledGoals()

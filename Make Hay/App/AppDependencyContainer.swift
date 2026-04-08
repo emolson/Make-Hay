@@ -46,6 +46,9 @@ final class AppDependencyContainer {
         healthService: healthService,
         blockerService: blockerService
     )
+
+    /// Shared root navigation state used for programmatic tab switching.
+    lazy var appNavigation: AppNavigationState = AppNavigationState()
     
     /// Creates a new dependency container with the provided services.
     /// - Parameters:

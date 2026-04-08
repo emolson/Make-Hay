@@ -1,0 +1,9 @@
+First Screen:
+- Instead of a sentence make each text a new line so the user reads and understand it. And chaange the lines to Move More, Scroll Less, Make Every Day Count
+- State on the first screen that Make Hay will block apps until fitness goals are met.
+Second Screen:
+- Remove the What do you want to accomplish text. Just have goals.
+Third Screen:
+- Once the user selects a goal, have the app ask for Health Permissions, instead of screen time.
+Fourth Screen and onward:
+- Go back through the app permission flow.

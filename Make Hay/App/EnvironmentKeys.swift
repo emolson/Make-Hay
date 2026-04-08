@@ -65,6 +65,17 @@ private struct DashboardViewModelKey: EnvironmentKey {
     )
 }
 
+// MARK: - App Navigation
+
+/// Environment key for shared root-level tab navigation state.
+///
+/// **Why a concrete type?** Like other `@Observable` environment values in this app,
+/// SwiftUI observation needs the concrete instance so tab selection changes invalidate
+/// dependent views automatically.
+private struct AppNavigationKey: EnvironmentKey {
+    @MainActor static let defaultValue: AppNavigationState = AppNavigationState()
+}
+
 // MARK: - EnvironmentValues Extension
 
 extension EnvironmentValues {
@@ -104,5 +115,14 @@ extension EnvironmentValues {
     var permissionManager: PermissionManager {
         get { self[PermissionManagerKey.self] }
         set { self[PermissionManagerKey.self] = newValue }
+    }
+
+    /// Shared root navigation state for switching tabs from anywhere in the app.
+    ///
+    /// Inject at the app root: `.environment(\.appNavigation, container.appNavigation)`
+    /// Consume in any view: `@Environment(\.appNavigation) private var appNavigation`
+    var appNavigation: AppNavigationState {
+        get { self[AppNavigationKey.self] }
+        set { self[AppNavigationKey.self] = newValue }
     }
 }

@@ -36,6 +36,9 @@ struct DashboardView: View {
     /// **Why `@Environment`?** Permissions are now managed by a centralised
     /// `PermissionManager` rather than duplicated in the ViewModel and SettingsView.
     @Environment(\.permissionManager) private var permissionManager
+
+    /// Shared app navigation state used to route permission recovery to the Settings tab.
+    @Environment(\.appNavigation) private var appNavigation
     
     /// Tracks the current scene phase to respond to app lifecycle events.
     /// **Why observe scenePhase?** We need to refresh health data and check the gate
@@ -401,7 +404,10 @@ struct DashboardView: View {
     private var permissionsBanner: some View {
         PermissionsBannerView(
             healthStatus: permissionManager.healthAuthorizationStatus,
-            screenTimeAuthorized: permissionManager.screenTimeAuthorized
+            screenTimeAuthorized: permissionManager.screenTimeAuthorized,
+            onOpenSettings: {
+                appNavigation.selectedTab = .settings
+            }
         )
     }
     
@@ -471,7 +477,13 @@ struct DashboardView: View {
 
 /// A mock that always throws an error for preview purposes.
 private actor ErrorThrowingMockHealthService: HealthServiceProtocol {
-    var authorizationStatus: HealthAuthorizationStatus { .denied }
+    var authorizationStatus: HealthAuthorizationStatus {
+        get async { .denied }
+    }
+
+    var authorizationPromptShown: Bool {
+        get async { true }
+    }
     
     func requestAuthorization() async throws {
         throw HealthServiceError.authorizationDenied
