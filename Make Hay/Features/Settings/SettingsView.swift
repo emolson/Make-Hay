@@ -211,24 +211,27 @@ struct SettingsView: View {
             }
             .accessibilityIdentifier("screenTimePermissionRow")
             
-            // Open Settings Button
-            Button {
-                openAppSettings()
-            } label: {
-                HStack {
-                    Image(systemName: "gear")
-                    Text(String(localized: "Open App Settings"))
+            if shouldShowOpenAppSettingsButton {
+                Button {
+                    openAppSettings()
+                } label: {
+                    HStack {
+                        Image(systemName: "gear")
+                        Text(String(localized: "Open App Settings"))
+                    }
                 }
+                .accessibilityIdentifier("openSettingsButton")
             }
-            .accessibilityIdentifier("openSettingsButton")
 
-            Button(action: reviewHealthPermissions) {
-                HStack {
-                    Image(systemName: "heart.text.square")
-                    Text(String(localized: "Review Health Permissions"))
+            if shouldShowReviewHealthPermissionsButton {
+                Button(action: reviewHealthPermissions) {
+                    HStack {
+                        Image(systemName: "heart.text.square")
+                        Text(String(localized: "Review Health Permissions"))
+                    }
                 }
+                .accessibilityIdentifier("reviewHealthPermissionsButton")
             }
-            .accessibilityIdentifier("reviewHealthPermissionsButton")
         } header: {
             Text(String(localized: "Permissions"))
         } footer: {
@@ -362,6 +365,14 @@ struct SettingsView: View {
         permissionManager.screenTimeAuthorized
             ? String(localized: "Family Controls authorized")
             : String(localized: "Not authorized - app blocking unavailable")
+    }
+
+    private var shouldShowOpenAppSettingsButton: Bool {
+        !permissionManager.screenTimeAuthorized
+    }
+
+    private var shouldShowReviewHealthPermissionsButton: Bool {
+        !permissionManager.healthAuthorizationStatus.isAuthorized
     }
 
     private func openAppSettings() {
