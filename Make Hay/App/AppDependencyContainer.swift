@@ -117,10 +117,7 @@ final class AppDependencyContainer {
 
     // MARK: - Private
 
-    private static let logger = Logger(
-        subsystem: "com.ethanolson.Make-Hay",
-        category: "AppDependencyContainer"
-    )
+    private static let logger = AppLogger.logger(category: "AppDependencyContainer")
 
     /// One-time sanity check that the App Group container and UserDefaults suite are
     /// both reachable. Logs a fault and asserts in debug builds if either is missing.

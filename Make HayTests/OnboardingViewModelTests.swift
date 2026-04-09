@@ -92,6 +92,39 @@ struct OnboardingViewModelTests {
         #expect(SharedStorage.healthPermissionGranted == false)
     }
 
+    @Test("requestHealthPermission recovers when HealthKit times out after consuming the prompt")
+    func requestHealthPermissionRecoversAfterPromptWasConsumed() async {
+        let originalHealth = SharedStorage.healthPermissionGranted
+        let originalHealthPromptShown = SharedStorage.healthAuthorizationPromptShown
+        defer {
+            SharedStorage.healthPermissionGranted = originalHealth
+            SharedStorage.healthAuthorizationPromptShown = originalHealthPromptShown
+        }
+
+        let healthService = MockHealthService()
+        await healthService.setMockAuthorizationStatus(.notDetermined)
+        await healthService.setMockAuthorizationPromptShown(false)
+        await healthService.setMockAuthorizationOutcomeAfterRequest(
+            status: .authorized,
+            promptShown: true
+        )
+        await healthService.setShouldThrowError(true)
+
+        let sut = OnboardingViewModel(
+            healthService: healthService,
+            blockerService: MockBlockerService()
+        )
+
+        await sut.requestHealthPermission()
+
+        #expect(sut.healthPermissionGranted == true)
+        #expect(sut.healthAuthorizationStatus == .authorized)
+        #expect(sut.healthAuthorizationPromptShown == true)
+        #expect(sut.errorMessage == nil)
+        #expect(SharedStorage.healthPermissionGranted == true)
+        #expect(SharedStorage.healthAuthorizationPromptShown == true)
+    }
+
     @Test("requestHealthPermission keeps access unconfirmed when no readable samples exist")
     func requestHealthPermissionKeepsAccessUnconfirmed() async {
         let originalHealth = SharedStorage.healthPermissionGranted

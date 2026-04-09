@@ -7,6 +7,7 @@
 
 import FamilyControls
 import Foundation
+import os.log
 import SwiftUI
 
 /// Represents the steps in the onboarding flow.
@@ -199,6 +200,8 @@ final class OnboardingViewModel {
     
     /// The blocker service for Screen Time/FamilyControls operations.
     private let blockerService: any BlockerServiceProtocol
+
+    private static let logger = AppLogger.logger(category: "OnboardingViewModel")
     
     // MARK: - Initialization
     
@@ -337,17 +340,24 @@ final class OnboardingViewModel {
     /// session, onboarding should immediately reflect that state instead of briefly showing
     /// the unchecked version of the step.
     func refreshPermissionState() async {
-        let healthPromptShown = await healthService.authorizationPromptShown
-        let latestHealthStatus = (await healthService.authorizationStatus).normalized(promptShown: healthPromptShown)
+        await syncLiveHealthAuthorizationState()
         let latestScreenTimeStatus = await blockerService.isAuthorized
 
-        healthAuthorizationStatus = latestHealthStatus
-        healthAuthorizationPromptShown = healthPromptShown || latestHealthStatus.promptHasBeenShown
         screenTimePermissionGranted = latestScreenTimeStatus
-
-        SharedStorage.healthPermissionGranted = latestHealthStatus.isAuthorized
-        SharedStorage.healthAuthorizationPromptShown = healthAuthorizationPromptShown
         SharedStorage.screenTimePermissionGranted = screenTimePermissionGranted
+    }
+
+    @discardableResult
+    private func syncLiveHealthAuthorizationState() async -> HealthAuthorizationStatus {
+        let promptShown = await healthService.authorizationPromptShown
+        let status = (await healthService.authorizationStatus).normalized(promptShown: promptShown)
+
+        healthAuthorizationStatus = status
+        healthAuthorizationPromptShown = promptShown || status.promptHasBeenShown
+        SharedStorage.healthPermissionGranted = status.isAuthorized
+        SharedStorage.healthAuthorizationPromptShown = healthAuthorizationPromptShown
+
+        return status
     }
     
     // MARK: - Permission Requests
@@ -362,7 +372,7 @@ final class OnboardingViewModel {
     func requestHealthPermission() async {
         errorMessage = nil
         isRequestingPermission = true
-        await refreshPermissionState()
+        await syncLiveHealthAuthorizationState()
 
         guard healthAuthorizationStatus == .notDetermined,
               !healthAuthorizationPromptShown else {
@@ -372,25 +382,17 @@ final class OnboardingViewModel {
         
         do {
             try await healthService.requestAuthorization()
-            // Check actual authorization status instead of assuming success
-            let promptShown = await healthService.authorizationPromptShown
-            let status = (await healthService.authorizationStatus).normalized(promptShown: promptShown)
-            healthAuthorizationStatus = status
-            healthAuthorizationPromptShown = promptShown || status.promptHasBeenShown
-            SharedStorage.healthPermissionGranted = status.isAuthorized
-            SharedStorage.healthAuthorizationPromptShown = healthAuthorizationPromptShown
+            await syncLiveHealthAuthorizationState()
         } catch let error as HealthServiceError {
-            errorMessage = error.errorDescription
-            healthAuthorizationStatus = .notDetermined
-            healthAuthorizationPromptShown = false
-            SharedStorage.healthPermissionGranted = false
-            SharedStorage.healthAuthorizationPromptShown = false
+            let recoveredStatus = await syncLiveHealthAuthorizationState()
+            errorMessage = recoveredStatus == .notDetermined && !healthAuthorizationPromptShown
+                ? error.errorDescription
+                : nil
         } catch {
-            errorMessage = error.localizedDescription
-            healthAuthorizationStatus = .notDetermined
-            healthAuthorizationPromptShown = false
-            SharedStorage.healthPermissionGranted = false
-            SharedStorage.healthAuthorizationPromptShown = false
+            let recoveredStatus = await syncLiveHealthAuthorizationState()
+            errorMessage = recoveredStatus == .notDetermined && !healthAuthorizationPromptShown
+                ? error.localizedDescription
+                : nil
         }
         
         isRequestingPermission = false
@@ -456,11 +458,21 @@ final class OnboardingViewModel {
         
         do {
             try await blockerService.setSelection(selection)
+        } catch {
+            let _ = error
+            Self.logger.warning("Onboarding app selection save failed.")
+            errorMessage = String(localized: "Could not save your app selection. Please try again.")
+            return
+        }
+
+        do {
             try await blockerService.updateShields(shouldBlock: hasApps)
         } catch {
-            // Non-fatal during onboarding — the user can adjust in Settings later.
-            // The selection is still written to disk by `setSelection` even if
-            // `updateShields` fails, so state stays consistent.
+            // Non-fatal during onboarding — the selection is persisted, so the
+            // user can fix blocking in Settings later.
+            let _ = error
+            Self.logger.warning("Onboarding shield update failed.")
+            errorMessage = String(localized: "App selection saved, but blocking could not be applied. You can fix this in Settings.")
         }
     }
 }

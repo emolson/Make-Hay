@@ -82,13 +82,13 @@ struct PermissionsBannerView: View {
         let screenTimeMissing = !screenTimeAuthorized
 
         if healthUnconfirmed && screenTimeMissing {
-            return String(localized: "Screen Time still needs approval, and Apple Health access has not been confirmed yet.")
+            return String(localized: "Screen Time still needs approval, and Apple Health access has not been confirmed. Both are required to read your activity and unlock apps.")
         } else if healthMissing && screenTimeMissing {
-            return String(localized: "Turn on Apple Health to track goals and Screen Time to block apps.")
+            return String(localized: "Turn on Apple Health to track your activity and Screen Time to enable app blocking. These let Make Hay unlock your apps when you reach your goals.")
         } else if healthUnconfirmed {
-            return String(localized: "Apple Health access was requested, but Make Hay has not confirmed readable data yet.")
+            return String(localized: "Apple Health access was requested, but Make Hay has not confirmed readable data yet. Health data is used to unlock blocked apps.")
         } else if healthMissing {
-            return String(localized: "Turn on Apple Health to track your health goals.")
+            return String(localized: "Turn on Apple Health to allow Make Hay to read your activity and unlock your apps when you reach your goals.")
         } else {
             return String(localized: "Turn on Screen Time to block apps until you hit your goals.")
         }

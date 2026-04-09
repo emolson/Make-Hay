@@ -185,6 +185,5 @@ struct EmergencyUnlockView: View {
 
 #Preview {
     EmergencyUnlockView {
-        print("Emergency unlock confirmed")
     }
 }

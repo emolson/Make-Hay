@@ -11,10 +11,9 @@ import Foundation
 enum BlockerServiceError: Error, Sendable {
     /// Authorization for Family Controls failed.
     case authorizationFailed
-    
-    /// Failed to update the shield configuration.
-    /// - Parameter description: The localized description of the underlying error.
-    case shieldUpdateFailed(description: String)
+
+    /// Failed to update persisted blocking configuration.
+    case configurationUpdateFailed
     
     /// The app is not authorized to use Family Controls.
     case notAuthorized
@@ -25,8 +24,8 @@ extension BlockerServiceError: LocalizedError {
         switch self {
         case .authorizationFailed:
             return String(localized: "Failed to authorize Screen Time access.")
-        case .shieldUpdateFailed(let description):
-            return String(localized: "Failed to update app blocking: \(description)")
+        case .configurationUpdateFailed:
+            return String(localized: "Failed to update app blocking.")
         case .notAuthorized:
             return String(localized: "Screen Time access has not been authorized.")
         }

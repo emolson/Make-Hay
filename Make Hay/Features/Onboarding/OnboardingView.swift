@@ -334,7 +334,7 @@ private struct ScreenTimePermissionStepView: View {
                 .fontWeight(.bold)
                 .multilineTextAlignment(.center)
             
-            Text(String(localized: "Screen Time access lets Make Hay block the apps you choose until you hit your goal. You stay in control of which apps are blocked."))
+            Text(String(localized: "Screen Time access lets Make Hay use the Screen Time API to restrict access to the apps you choose until you hit your goal. You can easily revoke this access at any time in Settings."))
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

@@ -46,11 +46,14 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
     /// latest health data is always reflected, without unbounded queue growth.
     private var pendingEvaluation: Bool = false
 
+    /// Maximum time allowed for a complete background evaluation cycle (fetch +
+    /// evaluate + shield update). HealthKit gives the app ~30 seconds of background
+    /// execution; reserving 5 seconds for observer plumbing and completionHandler
+    /// leaves 25 seconds for actual work.
+    private static let evaluationBudgetSeconds: UInt64 = 25
+
     /// Logger for background health monitoring events.
-    private static let logger = Logger(
-        subsystem: "com.ethanolson.Make-Hay",
-        category: "BackgroundHealthMonitor"
-    )
+    private static let logger = AppLogger.logger(category: "BackgroundHealthMonitor")
 
     // MARK: - Health Types
 
@@ -101,7 +104,7 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
             return
         }
 
-        Self.logger.info("Starting background health monitoring for \(Self.observedTypes.count) types.")
+        Self.logger.info("Starting background health monitoring.")
 
         for sampleType in Self.observedTypes {
             registerObserverQuery(for: sampleType)
@@ -125,7 +128,7 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
             try await healthStore.disableAllBackgroundDelivery()
             Self.logger.info("All background deliveries disabled.")
         } catch {
-            Self.logger.error("Failed to disable background deliveries: \(error.localizedDescription)")
+            Self.logger.error("Failed to disable background deliveries.")
         }
 
         isMonitoring = false
@@ -138,7 +141,7 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
     /// caller (e.g., the Settings refresh button) can surface the error to the user.
     func syncNow() async throws {
         Self.logger.info("Manual sync requested.")
-        try await evaluateAndUpdateShields(throwOnFailure: true)
+        try await evaluateAndUpdateShields(throwOnFailure: true, source: .manualSync)
         Self.logger.info("Manual sync completed successfully.")
     }
 
@@ -158,14 +161,13 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
             [weak self] _, completionHandler, error in
 
             if let error {
-                Self.logger.error(
-                    "Observer query error for \(sampleType.identifier): \(error.localizedDescription)"
-                )
+                let _ = error
+                Self.logger.error("Observer query failed.")
                 completionHandler()
                 return
             }
 
-            Self.logger.info("Observer query fired for \(sampleType.identifier)")
+            Self.logger.info("Observer query fired.")
 
             guard let self else {
                 completionHandler()
@@ -183,7 +185,8 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
         healthStore.execute(query)
         observerQueries.append(query)
 
-        Self.logger.debug("Registered observer query for \(sampleType.identifier)")
+        let _ = sampleType
+        Self.logger.debug("Registered observer query.")
     }
 
     /// Enables background delivery for the given sample type.
@@ -195,11 +198,10 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
     private func enableBackgroundDelivery(for sampleType: HKSampleType) async {
         do {
             try await healthStore.enableBackgroundDelivery(for: sampleType, frequency: .hourly)
-            Self.logger.debug("Enabled background delivery for \(sampleType.identifier)")
+            Self.logger.debug("Enabled background delivery.")
         } catch {
-            Self.logger.error(
-                "Failed to enable background delivery for \(sampleType.identifier): \(error.localizedDescription)"
-            )
+            let _ = error
+            Self.logger.error("Failed to enable background delivery.")
         }
     }
 
@@ -219,15 +221,18 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
         }
 
         isEvaluating = true
-        // Background callbacks use fail-safe mode (errors are logged, shields unchanged).
-        try? await evaluateAndUpdateShields(throwOnFailure: false)
+        // Background observer: fail-safe mode — errors are logged inside
+        // evaluateAndUpdateShields; shields stay unchanged on failure to
+        // prevent accidental unblocking when HealthKit is temporarily unavailable.
+        try? await evaluateAndUpdateShields(throwOnFailure: false, source: .observer)
         isEvaluating = false
 
         if pendingEvaluation {
             pendingEvaluation = false
             Self.logger.debug("Running coalesced follow-up evaluation.")
             isEvaluating = true
-            try? await evaluateAndUpdateShields(throwOnFailure: false)
+            // Same fail-safe policy for the coalesced follow-up.
+            try? await evaluateAndUpdateShields(throwOnFailure: false, source: .observer)
             isEvaluating = false
         }
     }
@@ -235,11 +240,17 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
     /// Fetches fresh health data, evaluates the user's goal configuration, and updates
     /// Screen Time shields accordingly.
     ///
-    /// - Parameter throwOnFailure: When `true` (foreground/manual sync), errors propagate
-    ///   to the caller. When `false` (background observer), errors are logged and shields
-    ///   remain unchanged — the fail-safe policy that prevents accidental unblocking when
-    ///   HealthKit is temporarily unavailable.
-    private func evaluateAndUpdateShields(throwOnFailure: Bool) async throws {
+    /// - Parameters:
+    ///   - throwOnFailure: When `true` (foreground/manual sync), errors propagate
+    ///     to the caller. When `false` (background observer), errors are logged and shields
+    ///     remain unchanged — the fail-safe policy that prevents accidental unblocking when
+    ///     HealthKit is temporarily unavailable.
+    ///   - source: The trigger that initiated this evaluation, recorded in shared freshness
+    ///     metadata so the app and extension can reason about recency and reliability.
+    private func evaluateAndUpdateShields(
+        throwOnFailure: Bool,
+        source: SharedStorage.EvaluationSource
+    ) async throws {
         // Load the goal configuration.
         var goal = HealthGoal.load()
 
@@ -256,45 +267,87 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
         }
 
         do {
-            // Fetch current health metrics.
-            let currentData = try await healthService.fetchCurrentData()
+            // Wrap the fetch-evaluate-update pipeline in a budget timeout so a
+            // hung HealthKit query doesn't consume the entire ~30s wake window
+            // without calling the observer completionHandler.
+            let shouldBlock = try await withThrowingTaskGroup(of: Bool.self) { group in
+                group.addTask { [healthService] in
+                    // Fetch current health metrics.
+                    let currentData = try await healthService.fetchCurrentData()
 
-            // Fetch exercise minutes for each enabled exercise goal.
-            var exerciseMinutesByGoalId: [UUID: Int] = [:]
-            for exerciseGoal in goal.exerciseGoals where exerciseGoal.isEnabled {
-                let minutes = try await healthService.fetchExerciseMinutes(
-                    for: exerciseGoal.exerciseType.hkWorkoutActivityType
-                )
-                exerciseMinutesByGoalId[exerciseGoal.id] = minutes
+                    // Fetch exercise minutes for each enabled exercise goal.
+                    var exerciseMinutesByGoalId: [UUID: Int] = [:]
+                    for exerciseGoal in goal.exerciseGoals where exerciseGoal.isEnabled {
+                        try Task.checkCancellation()
+                        let minutes = try await healthService.fetchExerciseMinutes(
+                            for: exerciseGoal.exerciseType.hkWorkoutActivityType
+                        )
+                        exerciseMinutesByGoalId[exerciseGoal.id] = minutes
+                    }
+
+                    // Compute current time for time-block goal evaluation.
+                    let now = Date()
+                    let components = Calendar.current.dateComponents([.hour, .minute], from: now)
+                    let minutesSinceMidnight = (components.hour ?? 0) * 60 + (components.minute ?? 0)
+
+                    let snapshot = GoalEvaluationSnapshot(
+                        steps: currentData.steps,
+                        activeEnergy: currentData.activeEnergy,
+                        exerciseMinutesByGoalId: exerciseMinutesByGoalId,
+                        currentMinutesSinceMidnight: minutesSinceMidnight
+                    )
+
+                    return GoalBlockingEvaluator.shouldBlock(goal: goal, snapshot: snapshot)
+                }
+
+                group.addTask {
+                    try await Task.sleep(nanoseconds: Self.evaluationBudgetSeconds * 1_000_000_000)
+                    throw CancellationError()
+                }
+
+                guard let result = try await group.next() else {
+                    throw CancellationError()
+                }
+                group.cancelAll()
+                return result
             }
-
-            // Compute current time for time-block goal evaluation.
-            let now = Date()
-            let components = Calendar.current.dateComponents([.hour, .minute], from: now)
-            let minutesSinceMidnight = (components.hour ?? 0) * 60 + (components.minute ?? 0)
-
-            let snapshot = GoalEvaluationSnapshot(
-                steps: currentData.steps,
-                activeEnergy: currentData.activeEnergy,
-                exerciseMinutesByGoalId: exerciseMinutesByGoalId,
-                currentMinutesSinceMidnight: minutesSinceMidnight
-            )
-
-            // **Why no MainActor hop?** `GoalBlockingEvaluator` contains pure static
-            // functions with no UI or actor-isolated state. Running on the background
-            // thread avoids unnecessary main-thread contention during the ~30s budget.
-            let shouldBlock = GoalBlockingEvaluator.shouldBlock(goal: goal, snapshot: snapshot)
 
             try await blockerService.updateShields(shouldBlock: shouldBlock)
 
-            Self.logger.info(
-                "Evaluation complete — shouldBlock: \(shouldBlock), steps: \(currentData.steps), energy: \(currentData.activeEnergy)"
-            )
+            // Record success in shared freshness metadata.
+            SharedStorage.recordEvaluationSuccess(source: source)
+
+            let _ = shouldBlock
+            let _ = source
+            Self.logger.info("Background evaluation completed.")
+        } catch is CancellationError {
+            Self.logger.error("Background evaluation timed out; shields unchanged.")
+            SharedStorage.recordEvaluationFailure(.timeout)
+            if throwOnFailure { throw HealthServiceError.queryTimedOut }
         } catch {
-            Self.logger.error(
-                "Evaluation failed — shields unchanged: \(error.localizedDescription)"
-            )
+            let failureReason = failureReason(for: error)
+            Self.logger.error("Background evaluation failed; shields unchanged.")
+            SharedStorage.recordEvaluationFailure(failureReason)
             if throwOnFailure { throw error }
+        }
+    }
+
+    private func failureReason(for error: Error) -> SharedStorage.EvaluationFailureReason {
+        switch error {
+        case is CancellationError:
+            return .timeout
+        case HealthServiceError.authorizationDenied,
+             BlockerServiceError.authorizationFailed,
+             BlockerServiceError.notAuthorized:
+            return .authorizationUnavailable
+        case HealthServiceError.healthKitNotAvailable,
+             HealthServiceError.queryFailed,
+             HealthServiceError.queryTimedOut:
+            return .healthDataUnavailable
+        case BlockerServiceError.configurationUpdateFailed:
+            return .shieldUpdateFailed
+        default:
+            return .unknown
         }
     }
 }

@@ -32,9 +32,10 @@ private struct BlockerServiceKey: EnvironmentKey {
 
 /// Environment key for the shared `PermissionManager`.
 ///
-/// **Why the concrete type?** `@Observable` observation tracking requires access through
-/// the concrete type's `ObservationRegistrar`. Protocol existentials break SwiftUI's
-/// automatic view invalidation, so we inject the concrete class — same pattern as
+/// **Why the concrete type?** `PermissionManager` conforms to `PermissionManaging`, but
+/// `@Observable` observation tracking requires access through the concrete type's
+/// `ObservationRegistrar`. Protocol existentials break SwiftUI's automatic view
+/// invalidation, so we inject the concrete class — same pattern as
 /// `DashboardViewModelKey`.
 ///
 /// **Why mock-backed default?** Mock services make previews zero-config — no HealthKit
@@ -53,7 +54,8 @@ private struct PermissionManagerKey: EnvironmentKey {
 /// **Why the concrete type instead of its protocols?** `DashboardViewModel` conforms to
 /// `GoalStatusProvider`. Injecting a single concrete
 /// instance avoids needing separate mock classes for each protocol facet. Views that
-/// only need one protocol facet simply access it through the VM.
+/// only need one protocol facet simply access it through the VM. The environment still
+/// uses the concrete type so SwiftUI Observation can track property reads.
 ///
 /// **Why mock-backed default?** Keeps previews zero-config. The default VM is backed by
 /// mock services so it renders meaningful placeholder data without HealthKit or

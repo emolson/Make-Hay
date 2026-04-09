@@ -5,13 +5,9 @@
 //  Created by Ethan Olson on 12/31/25.
 //
 
-import SwiftUI
 import HealthKit
-
-/// Read-only provider exposing current gate state for reuse by other feature ViewModels.
-protocol GoalStatusProvider: AnyObject {
-    var isBlocking: Bool { get }
-}
+import os.log
+import SwiftUI
 
 /// Supported goal types for dashboard display.
 enum GoalType: String, Sendable, CaseIterable, Identifiable {
@@ -133,6 +129,10 @@ final class DashboardViewModel: GoalStatusProvider {
     var hasError: Bool {
         errorMessage != nil
     }
+
+    /// Non-blocking warning shown when shield updates fail but health data loaded successfully.
+    /// Unlike `errorMessage`, this does not replace the goals UI — it appears as a subtle banner.
+    var shieldWarning: String?
     
     /// Controls presentation of the Add Goal sheet.
     var isShowingAddGoal: Bool = false
@@ -342,6 +342,8 @@ final class DashboardViewModel: GoalStatusProvider {
     private let healthService: any HealthServiceProtocol
     private let blockerService: any BlockerServiceProtocol
     private let timeUnlockScheduler: any TimeUnlockScheduling
+
+    private static let logger = AppLogger.logger(category: "DashboardViewModel")
     
     /// Reference to the running time-tick timer task.
     @ObservationIgnored
@@ -376,8 +378,13 @@ final class DashboardViewModel: GoalStatusProvider {
     /// yet. Subsequent foreground resumes go through `loadGoals()` directly.
     func onAppear() async {
         refreshGoalFromStorage()
-        _ = try? await blockerService.applyPendingSelectionIfReady()
-        startTimeTickTimer()
+        do {
+            _ = try await blockerService.applyPendingSelectionIfReady()
+        } catch {
+            let _ = error
+            Self.logger.warning("Failed to apply pending selection on appear.")
+        }
+        updateTimeTickTimer()
 
         if SharedStorage.healthPermissionGranted {
             await loadGoals()
@@ -395,10 +402,16 @@ final class DashboardViewModel: GoalStatusProvider {
         
         // Apply any pending goal changes that are now effective
         refreshGoalFromStorage()
-        _ = try? await blockerService.applyPendingSelectionIfReady()
+        do {
+            _ = try await blockerService.applyPendingSelectionIfReady()
+        } catch {
+            let _ = error
+            Self.logger.warning("Failed to apply pending selection during load.")
+        }
         
         isLoading = true
         errorMessage = nil
+        shieldWarning = nil
         
         defer { isLoading = false }
         
@@ -408,6 +421,7 @@ final class DashboardViewModel: GoalStatusProvider {
             currentActiveEnergy = results.activeEnergy
             currentExerciseMinutes = results.exerciseMinutes
             scheduleTimeUnlockIfNeeded()
+            updateTimeTickTimer()
             // Check and update blocking status after loading metrics
             await checkGoalStatus()
         } catch {
@@ -433,7 +447,12 @@ final class DashboardViewModel: GoalStatusProvider {
             SharedStorage.healthPermissionGranted = authorizationStatus.isAuthorized
             SharedStorage.healthAuthorizationPromptShown = promptShown || authorizationStatus.promptHasBeenShown
             refreshGoalFromStorage()
-            _ = try? await blockerService.applyPendingSelectionIfReady()
+            do {
+                _ = try await blockerService.applyPendingSelectionIfReady()
+            } catch {
+                let _ = error
+                Self.logger.warning("Failed to apply pending selection during auth flow.")
+            }
             let results = try await fetchEnabledGoals()
             currentSteps = results.steps
             currentActiveEnergy = results.activeEnergy
@@ -449,6 +468,31 @@ final class DashboardViewModel: GoalStatusProvider {
     /// Clears the current error message.
     func dismissError() {
         errorMessage = nil
+    }
+
+    /// Clears the shield warning banner.
+    func dismissShieldWarning() {
+        shieldWarning = nil
+    }
+
+    /// Whether the time-tick timer is needed right now.
+    ///
+    /// The timer only serves the time-unlock progress bar, so it should only
+    /// run when a time-block goal is enabled and scheduled for today.
+    private var needsTimeTickTimer: Bool {
+        healthGoal.timeBlockGoal.isEnabled && healthGoal.timeBlockGoal.schedule.includestoday
+    }
+
+    /// Starts or stops the time-tick timer based on current goal state.
+    ///
+    /// Call after any change that might enable or disable the time-block goal
+    /// (e.g., `loadGoals`, `addGoal`, `removeGoal`, `updateGoal`).
+    func updateTimeTickTimer() {
+        if needsTimeTickTimer {
+            startTimeTickTimer()
+        } else {
+            stopTimeTickTimer()
+        }
     }
 
     /// Starts a background timer that increments `timeTick` every 60 seconds.
@@ -581,6 +625,7 @@ final class DashboardViewModel: GoalStatusProvider {
         
         saveGoal()
         scheduleTimeUnlockIfNeeded()
+        updateTimeTickTimer()
         
         // Re-check blocking status after removing a goal
         await checkGoalStatus()
@@ -618,6 +663,7 @@ final class DashboardViewModel: GoalStatusProvider {
         
         // Ensure time-based goals are rescheduled and blocking status is refreshed
         scheduleTimeUnlockIfNeeded()
+        updateTimeTickTimer()
         await checkGoalStatus()
     }
     
@@ -781,8 +827,10 @@ final class DashboardViewModel: GoalStatusProvider {
     /// Checks the user's progress toward their goal and updates app blocking accordingly.
     /// **Why this is the "gate"?** This is where health achievement (the "key") controls
     /// app access (the "lock"). If steps < goal, apps are blocked. If goal is met, access is granted.
-    /// **Why try? instead of do-catch?** Blocking failures shouldn't prevent the UI from working.
-    /// If the blocker service fails, we silently continue to display health data.
+    /// **Why do-catch with warning?** Shield update failures shouldn't prevent the UI from
+    /// showing health data, but they must not be invisible. A failed shield update means
+    /// the blocking state may be out of sync with the user's progress. We log the error
+    /// and surface a non-blocking `shieldWarning` so the user knows to retry.
     /// - Returns: True if blocking state changed from blocked to unblocked (goal achieved)
     @discardableResult
     private func checkGoalStatus() async -> Bool {
@@ -792,12 +840,16 @@ final class DashboardViewModel: GoalStatusProvider {
         )
         let wasBlocking = isBlocking
         
-        if shouldBlock {
-            try? await blockerService.updateShields(shouldBlock: true)
-            isBlocking = true
-        } else {
-            try? await blockerService.updateShields(shouldBlock: false)
-            isBlocking = false
+        do {
+            try await blockerService.updateShields(shouldBlock: shouldBlock)
+            isBlocking = shouldBlock
+            shieldWarning = nil
+        } catch {
+            let _ = shouldBlock
+            Self.logger.error("Shield update failed.")
+            shieldWarning = error.localizedDescription
+            // Keep the previous isBlocking state since the shield update failed —
+            // the actual shield state on-device is unchanged.
         }
         
         // Return true if we transitioned from blocked to unblocked (goal achieved!)

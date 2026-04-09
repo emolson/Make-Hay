@@ -128,10 +128,9 @@ struct DashboardView: View {
                             try? await Task.sleep(for: .milliseconds(300))
                             guard !Task.isCancelled else { return }
 
-                            // Refresh permission status first — the user may have
-                            // just returned from Settings after re-granting access.
-                            await permissionManager.refresh()
-                            
+                            // Permission refresh and stale-data sync happen at the
+                            // MainTabView root level so they fire regardless of which
+                            // tab is active. Here we only reload goal UI state.
                             let previousGoalMet = viewModel.isGoalMet
                             await viewModel.loadGoals()
                             
@@ -178,6 +177,24 @@ struct DashboardView: View {
             // when HealthKit or Screen Time access has been revoked.
             if permissionManager.isPermissionMissing {
                 permissionsBanner
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets())
+            }
+
+            // Shield Warning Banner — shown when shield updates failed but
+            // health data loaded successfully.
+            if let shieldWarning = viewModel.shieldWarning {
+                shieldWarningBanner(message: shieldWarning)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets())
+            }
+
+            // Stale Data Banner — visible when background evaluation hasn't
+            // run recently and the displayed blocking state may be outdated.
+            if SharedStorage.isEvaluationStale && !viewModel.isLoading {
+                staleDataBanner
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets())
@@ -375,6 +392,80 @@ struct DashboardView: View {
         .background(Color.statusInfo.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal, 16)
         .accessibilityIdentifier("pendingChangeBanner")
+    }
+
+    /// Banner warning that a shield update failed. The blocking state displayed
+    /// may not match the actual device state.
+    private func shieldWarningBanner(message: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "shield.slash")
+                .font(.title3)
+                .foregroundStyle(Color.statusWarning)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(String(localized: "Blocking Update Failed"))
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button {
+                Task { await viewModel.loadGoals() }
+            } label: {
+                Text(String(localized: "Retry"))
+                    .font(.caption)
+                    .fontWeight(.medium)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .accessibilityIdentifier("shieldWarningRetryButton")
+        }
+        .padding()
+        .background(Color.statusWarning.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 16)
+        .accessibilityIdentifier("shieldWarningBanner")
+    }
+
+    /// Banner shown when the last background health evaluation is older than the
+    /// staleness threshold. Blocking state may be outdated.
+    private var staleDataBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.title3)
+                .foregroundStyle(Color.statusWarning)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(String(localized: "Data May Be Outdated"))
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+
+                Text(String(localized: "Background health sync hasn't run recently. Pull to refresh or tap Retry."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button {
+                Task { await viewModel.loadGoals() }
+            } label: {
+                Text(String(localized: "Retry"))
+                    .font(.caption)
+                    .fontWeight(.medium)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .accessibilityIdentifier("staleDataRetryButton")
+        }
+        .padding()
+        .background(Color.statusWarning.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 16)
+        .accessibilityIdentifier("staleDataBanner")
     }
     
     /// Creates an edit sheet for the specified goal progress.

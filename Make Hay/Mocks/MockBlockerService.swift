@@ -52,12 +52,10 @@ actor MockBlockerService: BlockerServiceProtocol {
     
     /// Simulates storing the user's app selection.
     /// - Parameter selection: The `FamilyActivitySelection` to store.
-    /// - Throws: `BlockerServiceError.shieldUpdateFailed` if `shouldThrowError` is `true`.
+    /// - Throws: `BlockerServiceError.configurationUpdateFailed` if `shouldThrowError` is `true`.
     func setSelection(_ selection: FamilyActivitySelection) async throws {
         if shouldThrowError {
-            throw BlockerServiceError.shieldUpdateFailed(
-                description: "Mock error"
-            )
+            throw BlockerServiceError.configurationUpdateFailed
         }
         self.selection = selection
     }
@@ -70,9 +68,7 @@ actor MockBlockerService: BlockerServiceProtocol {
 
     func setPendingSelection(_ selection: FamilyActivitySelection, effectiveDate: Date) async throws {
         if shouldThrowError {
-            throw BlockerServiceError.shieldUpdateFailed(
-                description: "Mock error"
-            )
+            throw BlockerServiceError.configurationUpdateFailed
         }
 
         pendingSelection = selection

@@ -13,14 +13,6 @@ extension DeviceActivityName {
     static let makeHayTimeUnlock = DeviceActivityName("makeHay.timeUnlock")
 }
 
-/// Protocol for scheduling time-based unlock monitoring.
-protocol TimeUnlockScheduling: Sendable {
-    /// Schedules a daily unlock monitor at the specified minutes since midnight.
-    func scheduleUnlock(unlockMinutes: Int) throws
-    /// Cancels any active unlock monitor.
-    func cancelUnlock()
-}
-
 /// Live scheduler backed by `DeviceActivityCenter`.
 struct DeviceActivityTimeUnlockScheduler: TimeUnlockScheduling {
 

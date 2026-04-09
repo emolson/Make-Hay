@@ -23,6 +23,10 @@ actor MockHealthService: HealthServiceProtocol {
 
     /// Whether the mock should report the HealthKit sheet as already shown.
     var mockAuthorizationPromptShown: Bool = false
+
+    /// Optional post-request state mutation applied immediately before returning or throwing.
+    var mockAuthorizationStatusAfterRequest: HealthAuthorizationStatus?
+    var mockAuthorizationPromptShownAfterRequest: Bool?
     
     /// When `true`, all methods will throw their respective errors.
     var shouldThrowError: Bool = false
@@ -53,6 +57,14 @@ actor MockHealthService: HealthServiceProtocol {
     /// Simulates requesting HealthKit authorization.
     /// - Throws: `HealthServiceError.authorizationDenied` if `shouldThrowError` is `true`.
     func requestAuthorization() async throws {
+        if let mockAuthorizationStatusAfterRequest {
+            mockAuthorizationStatus = mockAuthorizationStatusAfterRequest
+        }
+
+        if let mockAuthorizationPromptShownAfterRequest {
+            mockAuthorizationPromptShown = mockAuthorizationPromptShownAfterRequest
+        }
+
         if shouldThrowError {
             throw HealthServiceError.authorizationDenied
         }
@@ -66,11 +78,7 @@ actor MockHealthService: HealthServiceProtocol {
     func fetchDailySteps() async throws -> Int {
         if shouldThrowError {
             throw HealthServiceError.queryFailed(
-                underlying: NSError(
-                    domain: "MockHealthService",
-                    code: 0,
-                    userInfo: [NSLocalizedDescriptionKey: "Mock error for testing"]
-                )
+                description: "Mock error for testing"
             )
         }
         return mockSteps
@@ -82,11 +90,7 @@ actor MockHealthService: HealthServiceProtocol {
     func fetchActiveEnergy() async throws -> Double {
         if shouldThrowError {
             throw HealthServiceError.queryFailed(
-                underlying: NSError(
-                    domain: "MockHealthService",
-                    code: 0,
-                    userInfo: [NSLocalizedDescriptionKey: "Mock error for testing"]
-                )
+                description: "Mock error for testing"
             )
         }
         return mockActiveEnergy
@@ -99,11 +103,7 @@ actor MockHealthService: HealthServiceProtocol {
     func fetchExerciseMinutes(for activityType: HKWorkoutActivityType?) async throws -> Int {
         if shouldThrowError {
             throw HealthServiceError.queryFailed(
-                underlying: NSError(
-                    domain: "MockHealthService",
-                    code: 0,
-                    userInfo: [NSLocalizedDescriptionKey: "Mock error for testing"]
-                )
+                description: "Mock error for testing"
             )
         }
         return mockExerciseMinutes
@@ -113,11 +113,7 @@ actor MockHealthService: HealthServiceProtocol {
     func fetchCurrentData() async throws -> HealthCurrentData {
         if shouldThrowError {
             throw HealthServiceError.queryFailed(
-                underlying: NSError(
-                    domain: "MockHealthService",
-                    code: 0,
-                    userInfo: [NSLocalizedDescriptionKey: "Mock error for testing"]
-                )
+                description: "Mock error for testing"
             )
         }
 
@@ -158,5 +154,17 @@ actor MockHealthService: HealthServiceProtocol {
     /// - Parameter shown: The prompt-shown state to report.
     func setMockAuthorizationPromptShown(_ shown: Bool) {
         mockAuthorizationPromptShown = shown
+    }
+
+    /// Configures the authorization state to expose immediately after a request attempt.
+    /// - Parameters:
+    ///   - status: The status to surface after `requestAuthorization()` is called.
+    ///   - promptShown: The prompt-shown state to surface after `requestAuthorization()` is called.
+    func setMockAuthorizationOutcomeAfterRequest(
+        status: HealthAuthorizationStatus? = nil,
+        promptShown: Bool? = nil
+    ) {
+        mockAuthorizationStatusAfterRequest = status
+        mockAuthorizationPromptShownAfterRequest = promptShown
     }
 }

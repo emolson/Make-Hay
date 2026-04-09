@@ -5,7 +5,8 @@
 //  Created by GitHub Copilot on 2/19/26.
 //
 
-import DeviceActivity
+import FamilyControls
+@preconcurrency import DeviceActivity
 import Foundation
 import ManagedSettings
 import os.log
@@ -60,15 +61,20 @@ private struct GoalScheduleInfo: Decodable {
 }
 
 /// Device Activity monitor that performs background-resilient time unlock actions.
+///
+/// **Isolation:** DeviceActivity delivers callbacks on arbitrary background threads.
+/// All overrides are explicitly `nonisolated`. The stored `ManagedSettingsStore` is
+/// `Sendable` and the static logger is safe for concurrent access, so no actor hop
+/// is needed.
 final class MakeHayDeviceActivityMonitor: DeviceActivityMonitor {
-    private let store = ManagedSettingsStore(named: .init("makeHay"))
+    nonisolated private let store = ManagedSettingsStore(named: .init("makeHay"))
 
-    private static let logger = Logger(
+    nonisolated private static let logger = Logger(
         subsystem: "com.ethanolson.Make-Hay",
         category: "DeviceActivityMonitor"
     )
 
-    override func intervalDidStart(for activity: DeviceActivityName) {
+    nonisolated override func intervalDidStart(for activity: DeviceActivityName) {
         super.intervalDidStart(for: activity)
 
         guard activity == .makeHayTimeUnlock else { return }
@@ -89,7 +95,7 @@ final class MakeHayDeviceActivityMonitor: DeviceActivityMonitor {
                 case .recurring(let days):
                     let today = Calendar.current.component(.weekday, from: Date())
                     guard days.contains(today) else {
-                        Self.logger.info("Today (weekday \(today)) not in recurring schedule — skipping.")
+                        Self.logger.info("Recurring schedule inactive today; skipping shield clear.")
                         return
                     }
                 case .todayOnly(let expires):
@@ -110,9 +116,68 @@ final class MakeHayDeviceActivityMonitor: DeviceActivityMonitor {
         Self.logger.info("Shields cleared by time unlock.")
     }
 
+    /// Called when the time-unlock interval ends (23:59 daily).
+    ///
+    /// **Why re-shield here?** Without this, apps stay unshielded until the main app's
+    /// next background evaluation — which may be delayed by iOS throttling. Re-applying
+    /// shields at interval end ensures the block state is restored promptly.
+    ///
+    /// **Fail-closed:** If the persisted selection can't be loaded, we log a warning
+    /// but do nothing (shields stay cleared). This is intentional — re-shielding with
+    /// stale or empty data could lock the user out without recourse.
+    nonisolated override func intervalDidEnd(for activity: DeviceActivityName) {
+        super.intervalDidEnd(for: activity)
+
+        guard activity == .makeHayTimeUnlock else { return }
+
+        Self.logger.info("Time unlock interval ended.")
+
+        // Only re-shield if the time-block goal is still enabled and scheduled today.
+        guard let info = Self.loadTimeBlockInfo(), info.isEnabled else {
+            Self.logger.info("Time-block goal disabled or unreadable — skipping re-shield.")
+            return
+        }
+
+        // Same schedule guard used by intervalDidStart — the DeviceActivity schedule
+        // repeats daily, so we must skip re-shielding on days the goal is inactive.
+        if let schedule = info.schedule {
+            switch schedule {
+            case .recurring(let days):
+                let today = Calendar.current.component(.weekday, from: Date())
+                guard days.contains(today) else {
+                    Self.logger.info("Recurring schedule inactive today; skipping re-shield.")
+                    return
+                }
+            case .todayOnly(let expires):
+                let startOfToday = Calendar.current.startOfDay(for: Date())
+                if expires <= startOfToday {
+                    Self.logger.info("One-time schedule expired — skipping re-shield.")
+                    return
+                }
+            }
+        }
+
+        guard let selection = Self.loadPersistedSelection() else {
+            Self.logger.warning("No persisted app selection found — cannot re-shield.")
+            return
+        }
+
+        if !selection.applicationTokens.isEmpty {
+            store.shield.applications = selection.applicationTokens
+        }
+        if !selection.categoryTokens.isEmpty {
+            store.shield.applicationCategories = ShieldSettings.ActivityCategoryPolicy.specific(
+                selection.categoryTokens,
+                except: Set()
+            )
+        }
+
+        Self.logger.info("Shields re-applied after time unlock interval ended.")
+    }
+
     /// Reads the time-block goal info from App Group UserDefaults.
     /// Returns `nil` when data is missing or un-decodable (triggers fail-open behavior).
-    private static func loadTimeBlockInfo() -> GoalScheduleInfo.TimeBlockInfo? {
+    nonisolated private static func loadTimeBlockInfo() -> GoalScheduleInfo.TimeBlockInfo? {
         guard let defaults = UserDefaults(suiteName: "group.ethanolson.Make-Hay") else {
             logger.error("App Group UserDefaults unavailable in extension.")
             return nil
@@ -132,7 +197,38 @@ final class MakeHayDeviceActivityMonitor: DeviceActivityMonitor {
             let info = try JSONDecoder().decode(GoalScheduleInfo.self, from: data)
             return info.timeBlockGoal
         } catch {
-            logger.error("Failed to decode GoalScheduleInfo: \(error.localizedDescription)")
+            let _ = error
+            logger.error("Failed to decode time-block goal state.")
+            return nil
+        }
+    }
+
+    /// Reads the persisted `FamilyActivitySelection` from the App Group container.
+    ///
+    /// **Why load from disk?** The extension runs in a separate process and cannot access
+    /// `BlockerService`'s in-memory selection. The main app persists the selection as a
+    /// PropertyList file in the shared App Group container, which the extension reads here.
+    nonisolated private static func loadPersistedSelection() -> FamilyActivitySelection? {
+        guard let containerURL = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: "group.ethanolson.Make-Hay"
+        ) else {
+            logger.error("App Group container URL unavailable in extension.")
+            return nil
+        }
+
+        let selectionURL = containerURL.appendingPathComponent("FamilyActivitySelection.plist")
+
+        guard FileManager.default.fileExists(atPath: selectionURL.path) else {
+            logger.warning("Persisted blocked-app selection not found.")
+            return nil
+        }
+
+        do {
+            let data = try Data(contentsOf: selectionURL)
+            return try PropertyListDecoder().decode(FamilyActivitySelection.self, from: data)
+        } catch {
+            let _ = error
+            logger.error("Failed to decode persisted blocked-app selection.")
             return nil
         }
     }

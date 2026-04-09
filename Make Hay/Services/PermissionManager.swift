@@ -25,7 +25,7 @@ import Foundation
 /// are always on the main thread.
 @Observable
 @MainActor
-final class PermissionManager {
+final class PermissionManager: PermissionManaging {
 
     // MARK: - State
 

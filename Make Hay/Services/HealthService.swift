@@ -36,6 +36,17 @@ actor HealthService: HealthServiceProtocol {
     /// daemon is unresponsive (system pressure, post-update), waiting indefinitely traps
     /// the UI in a permanent loading spinner. 10 seconds is generous but bounded.
     private static let queryTimeoutSeconds: UInt64 = 10
+
+    /// Simulator HealthKit frequently consumes the authorization sheet without exposing
+    /// any readable samples we can probe. Treating `.unnecessary` as connected there
+    /// prevents onboarding from getting stuck behind an impossible verification step.
+    private nonisolated static var assumesAuthorizationOncePromptConsumed: Bool {
+#if targetEnvironment(simulator)
+        true
+#else
+        false
+#endif
+    }
     
     // MARK: - Initialization
     
@@ -94,7 +105,11 @@ actor HealthService: HealthServiceProtocol {
                     // The prompt has already been shown. Probe for proven readable data
                     // because HealthKit hides whether read-only permission was granted.
                     let hasAccess = await probeHealthDataAccess()
-                    return hasAccess ? .authorized : .unconfirmed
+                    if hasAccess || Self.assumesAuthorizationOncePromptConsumed {
+                        return .authorized
+                    }
+
+                    return .unconfirmed
                 case .unknown:
                     return .notDetermined
                 @unknown default:
@@ -213,7 +228,7 @@ actor HealthService: HealthServiceProtocol {
                     options: .cumulativeSum
                 ) { _, statistics, error in
                     if let error = error {
-                        continuation.resume(throwing: HealthServiceError.queryFailed(underlying: error))
+                        continuation.resume(throwing: HealthServiceError.queryFailed(description: error.localizedDescription))
                         return
                     }
                     
@@ -248,7 +263,7 @@ actor HealthService: HealthServiceProtocol {
                     options: .cumulativeSum
                 ) { _, statistics, error in
                     if let error = error {
-                        continuation.resume(throwing: HealthServiceError.queryFailed(underlying: error))
+                        continuation.resume(throwing: HealthServiceError.queryFailed(description: error.localizedDescription))
                         return
                     }
                     
@@ -289,7 +304,7 @@ actor HealthService: HealthServiceProtocol {
                         sortDescriptors: nil
                     ) { _, samples, error in
                         if let error = error {
-                            continuation.resume(throwing: HealthServiceError.queryFailed(underlying: error))
+                            continuation.resume(throwing: HealthServiceError.queryFailed(description: error.localizedDescription))
                             return
                         }
                         
@@ -317,7 +332,7 @@ actor HealthService: HealthServiceProtocol {
                         options: .cumulativeSum
                     ) { _, statistics, error in
                         if let error = error {
-                            continuation.resume(throwing: HealthServiceError.queryFailed(underlying: error))
+                            continuation.resume(throwing: HealthServiceError.queryFailed(description: error.localizedDescription))
                             return
                         }
                         

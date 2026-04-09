@@ -14,6 +14,9 @@ import ManagedSettings
 /// **Why use an Actor?** FamilyControls and ManagedSettings involve shared mutable state
 /// (the `ManagedSettingsStore` and persisted selection). Using an Actor ensures thread-safe
 /// access to this state, preventing data races when called from multiple async contexts.
+///
+/// Persistence is delegated to an injected `SelectionRepositoryProtocol`, keeping this
+/// actor focused on shield orchestration.
 actor BlockerService: BlockerServiceProtocol {
     
     // MARK: - Properties
@@ -24,6 +27,9 @@ actor BlockerService: BlockerServiceProtocol {
     /// with the system-wide Screen Time configuration. A named store isolates this app's
     /// shield settings so they never conflict with other profiles.
     private let store = ManagedSettingsStore(named: .init("makeHay"))
+
+    /// Repository owning all selection persistence (file protection, corruption recovery).
+    private let repository: any SelectionRepositoryProtocol
     
     /// The user's current app selection for blocking.
     private var selection: FamilyActivitySelection = FamilyActivitySelection()
@@ -33,27 +39,6 @@ actor BlockerService: BlockerServiceProtocol {
 
     /// Effective date for applying `pendingSelection`.
     private var pendingSelectionEffectiveDate: Date?
-    
-    /// The file URL where the selection is persisted.
-    private static var selectionURL: URL {
-        SharedStorage.familyActivitySelectionURL ?? fallbackDocumentsURL(
-            fileName: "FamilyActivitySelection.plist"
-        )
-    }
-
-    /// The file URL where pending selection is persisted.
-    private static var pendingSelectionURL: URL {
-        SharedStorage.pendingFamilyActivitySelectionURL ?? fallbackDocumentsURL(
-            fileName: "PendingFamilyActivitySelection.plist"
-        )
-    }
-
-    /// The file URL where pending selection effective date is persisted.
-    private static var pendingSelectionDateURL: URL {
-        SharedStorage.pendingFamilyActivitySelectionDateURL ?? fallbackDocumentsURL(
-            fileName: "PendingFamilyActivitySelectionDate.plist"
-        )
-    }
     
     // MARK: - BlockerServiceProtocol
     
@@ -68,11 +53,17 @@ actor BlockerService: BlockerServiceProtocol {
     
     // MARK: - Initialization
     
-    init() {
+    /// Creates a new `BlockerService`.
+    ///
+    /// - Parameter repository: The persistence back-end for selection payloads.
+    ///   Defaults to the file-backed `SelectionRepository`.
+    init(repository: any SelectionRepositoryProtocol = SelectionRepository()) {
+        self.repository = repository
+
         // Load persisted selection on initialization without crossing actor isolation.
-        self.selection = Self.loadPersistedSelection()
-        self.pendingSelection = Self.loadPersistedPendingSelection()
-        self.pendingSelectionEffectiveDate = Self.loadPersistedPendingSelectionDate()
+        self.selection = repository.loadSelection()
+        self.pendingSelection = repository.loadPendingSelection()
+        self.pendingSelectionEffectiveDate = repository.loadPendingSelectionDate()
         
         // **Safety net:** If authorization was revoked while the app was closed,
         // orphaned shields could lock the user out of their device. Clear them
@@ -148,20 +139,18 @@ actor BlockerService: BlockerServiceProtocol {
     /// `FamilyActivitySelection` conforms to `Codable`, allowing PropertyList encoding.
     ///
     /// - Parameter selection: The apps and categories selected for blocking.
-    /// - Throws: `BlockerServiceError.shieldUpdateFailed` if persistence fails.
+    /// - Throws: `BlockerServiceError.configurationUpdateFailed` if persistence fails.
     func setSelection(_ selection: FamilyActivitySelection) async throws {
-        self.selection = selection
-        
         do {
-            let encoder = PropertyListEncoder()
-            encoder.outputFormat = .binary
-            let data = try encoder.encode(selection)
-            try data.write(to: Self.selectionURL, options: .atomic)
-            clearPersistedPendingSelection()
+            try repository.saveSelection(selection)
+            repository.clearPendingSelection()
+            // Commit in-memory state only after persistence succeeds so the
+            // actor and disk stay in sync on failure.
+            self.selection = selection
             pendingSelection = nil
             pendingSelectionEffectiveDate = nil
         } catch {
-            throw BlockerServiceError.shieldUpdateFailed(description: error.localizedDescription)
+            throw BlockerServiceError.configurationUpdateFailed
         }
     }
     
@@ -175,19 +164,11 @@ actor BlockerService: BlockerServiceProtocol {
     /// Stores a pending selection and effective date for deferred application.
     func setPendingSelection(_ selection: FamilyActivitySelection, effectiveDate: Date) async throws {
         do {
-            let encoder = PropertyListEncoder()
-            encoder.outputFormat = .binary
-
-            let selectionData = try encoder.encode(selection)
-            try selectionData.write(to: Self.pendingSelectionURL, options: .atomic)
-
-            let dateData = try encoder.encode(effectiveDate)
-            try dateData.write(to: Self.pendingSelectionDateURL, options: .atomic)
-
+            try repository.savePendingSelection(selection, effectiveDate: effectiveDate)
             pendingSelection = selection
             pendingSelectionEffectiveDate = effectiveDate
         } catch {
-            throw BlockerServiceError.shieldUpdateFailed(description: error.localizedDescription)
+            throw BlockerServiceError.configurationUpdateFailed
         }
     }
 
@@ -213,19 +194,16 @@ actor BlockerService: BlockerServiceProtocol {
             return false
         }
 
-        self.selection = pendingSelection
-
         do {
-            let encoder = PropertyListEncoder()
-            encoder.outputFormat = .binary
-            let data = try encoder.encode(pendingSelection)
-            try data.write(to: Self.selectionURL, options: .atomic)
-            clearPersistedPendingSelection()
+            try repository.saveSelection(pendingSelection)
+            repository.clearPendingSelection()
+            // Commit in-memory state only after persistence succeeds.
+            self.selection = pendingSelection
             self.pendingSelection = nil
             self.pendingSelectionEffectiveDate = nil
             return true
         } catch {
-            throw BlockerServiceError.shieldUpdateFailed(description: error.localizedDescription)
+            throw BlockerServiceError.configurationUpdateFailed
         }
     }
 
@@ -233,77 +211,6 @@ actor BlockerService: BlockerServiceProtocol {
     func cancelPendingSelection() async {
         pendingSelection = nil
         pendingSelectionEffectiveDate = nil
-        clearPersistedPendingSelection()
-    }
-    
-    // MARK: - Private Methods
-    
-    /// Loads the persisted selection from disk.
-    ///
-    /// Called during initialization to restore the user's previous app selection.
-    /// If no file exists or decoding fails, returns an empty selection.
-    private static func loadPersistedSelection() -> FamilyActivitySelection {
-        guard FileManager.default.fileExists(atPath: Self.selectionURL.path) else {
-            return FamilyActivitySelection()
-        }
-        
-        do {
-            let data = try Data(contentsOf: Self.selectionURL)
-            let decoder = PropertyListDecoder()
-            return try decoder.decode(FamilyActivitySelection.self, from: data)
-        } catch {
-            // If loading fails, start with an empty selection
-            // This is intentionally silent - the user can re-select apps
-            return FamilyActivitySelection()
-        }
-    }
-
-    /// Loads persisted pending selection from disk.
-    private static func loadPersistedPendingSelection() -> FamilyActivitySelection? {
-        guard FileManager.default.fileExists(atPath: Self.pendingSelectionURL.path) else {
-            return nil
-        }
-
-        do {
-            let data = try Data(contentsOf: Self.pendingSelectionURL)
-            let decoder = PropertyListDecoder()
-            return try decoder.decode(FamilyActivitySelection.self, from: data)
-        } catch {
-            return nil
-        }
-    }
-
-    /// Loads persisted pending effective date from disk.
-    private static func loadPersistedPendingSelectionDate() -> Date? {
-        guard FileManager.default.fileExists(atPath: Self.pendingSelectionDateURL.path) else {
-            return nil
-        }
-
-        do {
-            let data = try Data(contentsOf: Self.pendingSelectionDateURL)
-            let decoder = PropertyListDecoder()
-            return try decoder.decode(Date.self, from: data)
-        } catch {
-            return nil
-        }
-    }
-
-    /// Deletes persisted pending selection artifacts.
-    private func clearPersistedPendingSelection() {
-        let fileManager = FileManager.default
-        if fileManager.fileExists(atPath: Self.pendingSelectionURL.path) {
-            try? fileManager.removeItem(at: Self.pendingSelectionURL)
-        }
-        if fileManager.fileExists(atPath: Self.pendingSelectionDateURL.path) {
-            try? fileManager.removeItem(at: Self.pendingSelectionDateURL)
-        }
-    }
-
-    private static func fallbackDocumentsURL(fileName: String) -> URL {
-        let documentsDirectory = FileManager.default.urls(
-            for: .documentDirectory,
-            in: .userDomainMask
-        ).first ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        return documentsDirectory.appendingPathComponent(fileName)
+        repository.clearPendingSelection()
     }
 }

@@ -13,10 +13,7 @@ enum SharedStorage {
     /// App Group identifier used for cross-process persistence.
     nonisolated static let appGroupIdentifier: String = "group.ethanolson.Make-Hay"
 
-    private nonisolated static let logger = Logger(
-        subsystem: "com.ethanolson.Make-Hay",
-        category: "SharedStorage"
-    )
+    private nonisolated static let logger = AppLogger.logger(category: "SharedStorage")
 
     /// Shared UserDefaults suite for cross-process state (for example, `HealthGoal`).
     ///
@@ -53,18 +50,6 @@ enum SharedStorage {
             )
         }
         return url
-    }
-
-    nonisolated static var familyActivitySelectionURL: URL? {
-        appGroupContainerURL?.appendingPathComponent("FamilyActivitySelection.plist")
-    }
-
-    nonisolated static var pendingFamilyActivitySelectionURL: URL? {
-        appGroupContainerURL?.appendingPathComponent("PendingFamilyActivitySelection.plist")
-    }
-
-    nonisolated static var pendingFamilyActivitySelectionDateURL: URL? {
-        appGroupContainerURL?.appendingPathComponent("PendingFamilyActivitySelectionDate.plist")
     }
 
     // MARK: - Permission Status
@@ -106,5 +91,105 @@ enum SharedStorage {
     nonisolated static var screenTimePermissionGranted: Bool {
         get { appGroupDefaults.bool(forKey: screenTimePermissionGrantedKey) }
         set { appGroupDefaults.set(newValue, forKey: screenTimePermissionGrantedKey) }
+    }
+
+    // MARK: - Evaluation Freshness
+
+    /// Key for the last successful evaluation timestamp (stored as `TimeInterval`).
+    private nonisolated static let lastEvaluationTimeKey = "lastEvaluationTime"
+
+    /// Key for the source of the last successful evaluation.
+    private nonisolated static let lastEvaluationSourceKey = "lastEvaluationSource"
+
+    /// Key for the last evaluation failure description, if any.
+    private nonisolated static let lastEvaluationFailureKey = "lastEvaluationFailure"
+
+    /// Stable failure reasons persisted across processes.
+    ///
+    /// **Why codes instead of raw strings?** Background monitor failures can include
+    /// OS-provided details such as file paths or entitlement diagnostics. Persisting
+    /// only coarse reason codes keeps the UI informative without storing sensitive
+    /// implementation details in shared App Group defaults.
+    enum EvaluationFailureReason: String, Sendable {
+        case timeout = "timeout"
+        case authorizationUnavailable = "authorizationUnavailable"
+        case healthDataUnavailable = "healthDataUnavailable"
+        case shieldUpdateFailed = "shieldUpdateFailed"
+        case unknown = "unknown"
+    }
+
+    /// Sources that can trigger an evaluation cycle. Stored as raw strings in
+    /// UserDefaults so both the app and the Device Activity extension can read them
+    /// without sharing a compiled enum.
+    enum EvaluationSource: String, Sendable {
+        case observer = "observer"
+        case manualSync = "manualSync"
+        case foregroundFallback = "foregroundFallback"
+        case extensionUnlock = "extensionUnlock"
+    }
+
+    /// How long since the last successful evaluation before the data is considered
+    /// stale enough to justify a forced foreground sync.
+    ///
+    /// **Why 2 hours?** HealthKit background delivery uses `.hourly` cadence, so
+    /// under normal conditions the app evaluates at least once per hour. Two hours
+    /// accommodates a single missed delivery without over-syncing on every foreground.
+    nonisolated static let stalenessThresholdSeconds: TimeInterval = 2 * 60 * 60
+
+    /// Timestamp of the last successful evaluation, or `nil` if no evaluation has
+    /// completed yet.
+    nonisolated static var lastEvaluationDate: Date? {
+        get {
+            let interval = appGroupDefaults.double(forKey: lastEvaluationTimeKey)
+            return interval > 0 ? Date(timeIntervalSince1970: interval) : nil
+        }
+        set {
+            if let date = newValue {
+                appGroupDefaults.set(date.timeIntervalSince1970, forKey: lastEvaluationTimeKey)
+            } else {
+                appGroupDefaults.removeObject(forKey: lastEvaluationTimeKey)
+            }
+        }
+    }
+
+    /// The source that produced the most recent successful evaluation.
+    nonisolated static var lastEvaluationSource: EvaluationSource? {
+        get {
+            guard let raw = appGroupDefaults.string(forKey: lastEvaluationSourceKey) else { return nil }
+            return EvaluationSource(rawValue: raw)
+        }
+        set {
+            appGroupDefaults.set(newValue?.rawValue, forKey: lastEvaluationSourceKey)
+        }
+    }
+
+    /// Stable code for the most recent evaluation failure, cleared on success.
+    nonisolated static var lastEvaluationFailure: String? {
+        get { appGroupDefaults.string(forKey: lastEvaluationFailureKey) }
+        set {
+            if let value = newValue {
+                appGroupDefaults.set(value, forKey: lastEvaluationFailureKey)
+            } else {
+                appGroupDefaults.removeObject(forKey: lastEvaluationFailureKey)
+            }
+        }
+    }
+
+    /// Whether the last successful evaluation is older than `stalenessThresholdSeconds`.
+    nonisolated static var isEvaluationStale: Bool {
+        guard let last = lastEvaluationDate else { return true }
+        return Date().timeIntervalSince(last) > stalenessThresholdSeconds
+    }
+
+    /// Records a successful evaluation with the given source.
+    nonisolated static func recordEvaluationSuccess(source: EvaluationSource) {
+        lastEvaluationDate = Date()
+        lastEvaluationSource = source
+        lastEvaluationFailure = nil
+    }
+
+    /// Records an evaluation failure reason. Does not update the timestamp.
+    nonisolated static func recordEvaluationFailure(_ reason: EvaluationFailureReason) {
+        lastEvaluationFailure = reason.rawValue
     }
 }

@@ -61,7 +61,11 @@ enum HealthServiceError: Error, Sendable {
     
     /// A query to HealthKit failed.
     /// - Parameter description: The localized description of the underlying HealthKit error.
-    case queryFailed(underlying: Error)
+    ///
+    /// **Why `String` instead of `Error`?** `Error` is not guaranteed `Sendable`.
+    /// Storing the localized description keeps this enum fully `Sendable` under
+    /// Swift 6 strict concurrency without `@unchecked Sendable` workarounds.
+    case queryFailed(description: String)
     
     /// A HealthKit query did not respond within the allowed timeout.
     ///
@@ -78,8 +82,8 @@ extension HealthServiceError: LocalizedError {
             return String(localized: "Health data is not available on this device.")
         case .authorizationDenied:
             return String(localized: "Permission to access health data was denied.")
-        case .queryFailed(let underlying):
-            return String(localized: "Failed to fetch health data: \(underlying.localizedDescription)")
+        case .queryFailed(let description):
+            return String(localized: "Failed to fetch health data: \(description)")
         case .queryTimedOut:
             return String(localized: "Health data query timed out. Please try again.")
         }

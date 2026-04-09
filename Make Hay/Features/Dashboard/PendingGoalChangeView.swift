@@ -208,8 +208,6 @@ struct PendingGoalChangeView: View {
 
 #Preview {
     PendingGoalChangeView(context: .goalChange) {
-        print("Scheduled for tomorrow")
     } onEmergencyUnlock: {
-        print("Emergency unlock confirmed")
     }
 }
