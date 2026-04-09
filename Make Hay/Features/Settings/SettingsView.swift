@@ -21,6 +21,10 @@ struct SettingsView: View {
 
     /// SwiftUI environment action for opening the app's Settings page.
     @Environment(\.openURL) private var openURL
+
+    /// Tracks the app's foreground/background lifecycle so we can refresh
+    /// permission state when the user returns from the Health app or Settings.
+    @Environment(\.scenePhase) private var scenePhase
     
     /// The blocker service for app selection and debug shield toggling.
     @Environment(\.blockerService) private var blockerService
@@ -77,6 +81,10 @@ struct SettingsView: View {
             }
             .refreshable {
                 await permissionManager.refresh()
+            }
+            .onChange(of: scenePhase) {
+                guard scenePhase == .active else { return }
+                Task { await permissionManager.refresh() }
             }
             .alert(
                 String(localized: "Blocking Error"),
