@@ -5,6 +5,7 @@
 
 # Xcode
 build/
+buildServer.json
 *.moved-aside
 *.xccheckout
 *.xcscmblueprint
