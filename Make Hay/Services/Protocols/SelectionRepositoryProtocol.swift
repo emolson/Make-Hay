@@ -20,22 +20,22 @@ protocol SelectionRepositoryProtocol: Sendable {
     /// Returns an empty `FamilyActivitySelection` when no file exists or the file
     /// is unreadable (corruption / migration). Callers should treat this as "no apps
     /// selected" rather than an error.
-    func loadSelection() -> FamilyActivitySelection
+    nonisolated func loadSelection() -> FamilyActivitySelection
 
     /// Atomically saves the active selection with file protection.
     /// - Throws: If encoding or the protected write fails.
-    func saveSelection(_ selection: FamilyActivitySelection) throws
+    nonisolated func saveSelection(_ selection: FamilyActivitySelection) throws
 
     /// Loads the persisted pending selection, if any.
-    func loadPendingSelection() -> FamilyActivitySelection?
+    nonisolated func loadPendingSelection() -> FamilyActivitySelection?
 
     /// Loads the persisted pending selection effective date, if any.
-    func loadPendingSelectionDate() -> Date?
+    nonisolated func loadPendingSelectionDate() -> Date?
 
     /// Atomically saves the pending selection and its effective date with file protection.
     /// - Throws: If encoding or the protected write fails.
-    func savePendingSelection(_ selection: FamilyActivitySelection, effectiveDate: Date) throws
+    nonisolated func savePendingSelection(_ selection: FamilyActivitySelection, effectiveDate: Date) throws
 
     /// Deletes any persisted pending-selection artifacts.
-    func clearPendingSelection()
+    nonisolated func clearPendingSelection()
 }

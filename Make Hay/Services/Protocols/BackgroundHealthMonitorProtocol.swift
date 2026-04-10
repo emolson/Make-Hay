@@ -24,6 +24,49 @@ struct EvaluationResult: Sendable, Codable {
     var exerciseMinutesByGoalId: [UUID: Int]
     var shouldBlock: Bool
     var timestamp: Date
+
+    private enum CodingKeys: String, CodingKey {
+        case steps
+        case activeEnergy
+        case exerciseMinutesByGoalId
+        case shouldBlock
+        case timestamp
+    }
+
+    nonisolated init(
+        steps: Int,
+        activeEnergy: Double,
+        exerciseMinutesByGoalId: [UUID: Int],
+        shouldBlock: Bool,
+        timestamp: Date
+    ) {
+        self.steps = steps
+        self.activeEnergy = activeEnergy
+        self.exerciseMinutesByGoalId = exerciseMinutesByGoalId
+        self.shouldBlock = shouldBlock
+        self.timestamp = timestamp
+    }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.steps = try container.decode(Int.self, forKey: .steps)
+        self.activeEnergy = try container.decode(Double.self, forKey: .activeEnergy)
+        self.exerciseMinutesByGoalId = try container.decode(
+            [UUID: Int].self,
+            forKey: .exerciseMinutesByGoalId
+        )
+        self.shouldBlock = try container.decode(Bool.self, forKey: .shouldBlock)
+        self.timestamp = try container.decode(Date.self, forKey: .timestamp)
+    }
+
+    nonisolated func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(steps, forKey: .steps)
+        try container.encode(activeEnergy, forKey: .activeEnergy)
+        try container.encode(exerciseMinutesByGoalId, forKey: .exerciseMinutesByGoalId)
+        try container.encode(shouldBlock, forKey: .shouldBlock)
+        try container.encode(timestamp, forKey: .timestamp)
+    }
 }
 
 /// Protocol defining the interface for background HealthKit observation.

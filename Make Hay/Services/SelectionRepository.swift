@@ -31,9 +31,9 @@ struct SelectionRepository: SelectionRepositoryProtocol, Sendable {
     /// `completeUntilFirstUserAuthentication` keeps the payload encrypted at rest
     /// until the device is unlocked after boot, while still readable by the
     /// DeviceActivity extension during background execution.
-    private static let fileProtection: FileProtectionType = .completeUntilFirstUserAuthentication
+    private nonisolated static let fileProtection: FileProtectionType = .completeUntilFirstUserAuthentication
 
-    private static let logger = AppLogger.logger(category: "SelectionRepository")
+    private nonisolated static let logger = AppLogger.logger(category: "SelectionRepository")
 
     // MARK: - Initialization
 
@@ -41,7 +41,7 @@ struct SelectionRepository: SelectionRepositoryProtocol, Sendable {
     ///
     /// Falls back to the Documents directory when the App Group container is
     /// unavailable (e.g., misconfigured entitlements on the Simulator).
-    init() {
+    nonisolated init() {
         let base = SharedStorage.appGroupContainerURL ?? Self.fallbackDocumentsURL()
         self.selectionURL = base.appendingPathComponent("FamilyActivitySelection.plist")
         self.pendingSelectionURL = base.appendingPathComponent("PendingFamilyActivitySelection.plist")
@@ -49,7 +49,7 @@ struct SelectionRepository: SelectionRepositoryProtocol, Sendable {
     }
 
     /// Testable initializer accepting explicit URLs.
-    init(
+    nonisolated init(
         selectionURL: URL,
         pendingSelectionURL: URL,
         pendingSelectionDateURL: URL
@@ -61,28 +61,28 @@ struct SelectionRepository: SelectionRepositoryProtocol, Sendable {
 
     // MARK: - SelectionRepositoryProtocol
 
-    func loadSelection() -> FamilyActivitySelection {
+    nonisolated func loadSelection() -> FamilyActivitySelection {
         load(FamilyActivitySelection.self, from: selectionURL) ?? FamilyActivitySelection()
     }
 
-    func saveSelection(_ selection: FamilyActivitySelection) throws {
+    nonisolated func saveSelection(_ selection: FamilyActivitySelection) throws {
         try writeProtected(selection, to: selectionURL)
     }
 
-    func loadPendingSelection() -> FamilyActivitySelection? {
+    nonisolated func loadPendingSelection() -> FamilyActivitySelection? {
         load(FamilyActivitySelection.self, from: pendingSelectionURL)
     }
 
-    func loadPendingSelectionDate() -> Date? {
+    nonisolated func loadPendingSelectionDate() -> Date? {
         load(Date.self, from: pendingSelectionDateURL)
     }
 
-    func savePendingSelection(_ selection: FamilyActivitySelection, effectiveDate: Date) throws {
+    nonisolated func savePendingSelection(_ selection: FamilyActivitySelection, effectiveDate: Date) throws {
         try writeProtected(selection, to: pendingSelectionURL)
         try writeProtected(effectiveDate, to: pendingSelectionDateURL)
     }
 
-    func clearPendingSelection() {
+    nonisolated func clearPendingSelection() {
         let fm = FileManager.default
         for url in [pendingSelectionURL, pendingSelectionDateURL] where fm.fileExists(atPath: url.path) {
             try? fm.removeItem(at: url)
@@ -97,7 +97,7 @@ struct SelectionRepository: SelectionRepositoryProtocol, Sendable {
     /// the bad file is quarantined with a `.corrupt` suffix and `nil` is returned.
     /// This explicit migration handling surfaces the event in logs rather than
     /// silently swallowing it.
-    private func load<T: Decodable>(_ type: T.Type, from url: URL) -> T? {
+    private nonisolated func load<T: Decodable>(_ type: T.Type, from url: URL) -> T? {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
 
         do {
@@ -111,7 +111,7 @@ struct SelectionRepository: SelectionRepositoryProtocol, Sendable {
     }
 
     /// Encodes a `Codable` value and writes it atomically with file protection.
-    private func writeProtected<T: Encodable>(_ value: T, to url: URL) throws {
+    private nonisolated func writeProtected<T: Encodable>(_ value: T, to url: URL) throws {
         let encoder = PropertyListEncoder()
         encoder.outputFormat = .binary
         let data = try encoder.encode(value)
@@ -124,13 +124,13 @@ struct SelectionRepository: SelectionRepositoryProtocol, Sendable {
 
     /// Moves a corrupt file to a `.corrupt` suffix so it can be inspected later
     /// without blocking normal operation.
-    private func quarantine(_ url: URL) {
+    private nonisolated func quarantine(_ url: URL) {
         let quarantineURL = url.appendingPathExtension("corrupt")
         try? FileManager.default.removeItem(at: quarantineURL)
         try? FileManager.default.moveItem(at: url, to: quarantineURL)
     }
 
-    private static func fallbackDocumentsURL() -> URL {
+    private nonisolated static func fallbackDocumentsURL() -> URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
     }
