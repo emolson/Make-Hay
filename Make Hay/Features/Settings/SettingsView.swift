@@ -10,6 +10,8 @@ import SwiftUI
 /// The settings view where users can configure app permissions and blocked apps.
 /// Goals are managed in the Dashboard for a unified experience.
 struct SettingsView: View {
+
+    private static let traceCategory = "SettingsView"
     
     // MARK: - Dependencies
     
@@ -22,10 +24,6 @@ struct SettingsView: View {
     /// SwiftUI environment action for opening the app's Settings page.
     @Environment(\.openURL) private var openURL
 
-    /// Tracks the app's foreground/background lifecycle so we can refresh
-    /// permission state when the user returns from the Health app or Settings.
-    @Environment(\.scenePhase) private var scenePhase
-    
     /// The blocker service for app selection and debug shield toggling.
     @Environment(\.blockerService) private var blockerService
 
@@ -77,14 +75,18 @@ struct SettingsView: View {
             }
             .navigationTitle(String(localized: "Settings"))
             .task {
-                await permissionManager.refresh()
+                AppLogger.trace(
+                    category: Self.traceCategory,
+                    message: "Settings task started. Refreshing permissions."
+                )
+                await permissionManager.refresh(reason: "settings.task")
             }
             .refreshable {
-                await permissionManager.refresh()
-            }
-            .onChange(of: scenePhase) {
-                guard scenePhase == .active else { return }
-                Task { await permissionManager.refresh() }
+                AppLogger.trace(
+                    category: Self.traceCategory,
+                    message: "Settings pull-to-refresh triggered."
+                )
+                await permissionManager.refresh(reason: "settings.pullToRefresh")
             }
             .alert(
                 String(localized: "Blocking Error"),
@@ -393,7 +395,12 @@ struct SettingsView: View {
     /// only presents its sheet once per type set.
     private func requestHealthAccess() {
         Task {
-            await permissionManager.refresh()
+            AppLogger.trace(
+                category: Self.traceCategory,
+                message: "Health access request initiated from Settings."
+            )
+
+            await permissionManager.refresh(reason: "settings.requestHealthAccess.preflight")
 
             guard permissionManager.healthAuthorizationStatus == .notDetermined,
                   !permissionManager.healthAuthorizationPromptShown else {
@@ -425,16 +432,34 @@ struct SettingsView: View {
             isSyncing = true
             defer { isSyncing = false }
 
+            AppLogger.trace(
+                category: Self.traceCategory,
+                message: "Settings manual sync button tapped."
+            )
+
             do {
-                try await backgroundHealthMonitor.syncNow()
+                _ = try await backgroundHealthMonitor.syncNow(reason: "settings.manualRefreshButton")
+                AppLogger.trace(
+                    category: Self.traceCategory,
+                    message: "Settings manual sync succeeded."
+                )
+            } catch is CancellationError {
+                AppLogger.trace(
+                    category: Self.traceCategory,
+                    message: "Settings manual sync cancelled."
+                )
             } catch {
+                AppLogger.trace(
+                    category: Self.traceCategory,
+                    message: "Settings manual sync failed with surfaced error."
+                )
                 errorMessage = error.localizedDescription
                 showingErrorAlert = true
             }
 
             // Always refresh permission state after a sync attempt so the
             // Permissions section shows current status regardless of sync outcome.
-            await permissionManager.refresh()
+            await permissionManager.refresh(reason: "settings.manualRefreshButton.postSync")
         }
     }
 }

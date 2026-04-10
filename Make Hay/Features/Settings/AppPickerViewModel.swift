@@ -182,7 +182,7 @@ final class AppPickerViewModel {
         let isWeakeningBlock = isRemovingApps || isRemovingCategories
 
         if isWeakeningBlock {
-            let shouldDefer = await shouldDeferEdit()
+            let shouldDefer = shouldDeferEdit()
             if shouldDefer {
                 pendingSelectionCandidate = selection
                 showingPendingConfirmation = true
@@ -195,14 +195,11 @@ final class AppPickerViewModel {
 
     /// Returns true when edits must be deferred behind the next-day guard.
     ///
-    /// **Policy:** Always prefer fresh health reads for gate decisions. If fresh
-    /// fetch fails, default to deferred mode to avoid accidental bypass.
-    private func shouldDeferEdit() async -> Bool {
+    /// **Policy:** Uses the latest cached evaluation snapshot for gate decisions.
+    /// If no snapshot is available, defaults to deferred mode to avoid bypass.
+    private func shouldDeferEdit() -> Bool {
         let latestGoal = HealthGoal.load()
-        return await GoalGatekeeper.shouldDeferEdits(
-            goal: latestGoal,
-            healthService: healthService
-        )
+        return GoalGatekeeper.shouldDeferEdits(goal: latestGoal)
     }
 
     /// Persists the given selection and synchronises shields.

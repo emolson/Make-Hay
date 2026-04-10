@@ -5,6 +5,7 @@
 //  Created by Ethan Olson on 2/20/26.
 //
 
+import BackgroundTasks
 import Foundation
 
 /// Mock implementation of `BackgroundHealthMonitorProtocol` for previews and unit tests.
@@ -30,8 +31,23 @@ actor MockBackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
     /// The number of times `syncNow()` has been called.
     private(set) var syncNowCallCount: Int = 0
 
+    /// Whether `handleBackgroundRefresh(task:)` has been called.
+    private(set) var handleBackgroundRefreshCalled: Bool = false
+
+    /// The number of times `handleBackgroundRefresh(task:)` has been called.
+    private(set) var handleBackgroundRefreshCallCount: Int = 0
+
     /// When `true`, `syncNow()` will throw an error.
     var shouldThrowOnSync: Bool = false
+
+    /// The result returned by `syncNow()`. Override this to simulate different health states.
+    var stubbedResult: EvaluationResult = EvaluationResult(
+        steps: 0,
+        activeEnergy: 0,
+        exerciseMinutesByGoalId: [:],
+        shouldBlock: false,
+        timestamp: Date()
+    )
 
     func startMonitoring() async {
         startMonitoringCalled = true
@@ -43,7 +59,16 @@ actor MockBackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
         stopMonitoringCallCount += 1
     }
 
-    func syncNow() async throws {
+    func setShouldThrowOnSync(_ shouldThrow: Bool) {
+        shouldThrowOnSync = shouldThrow
+    }
+
+    func setStubbedResult(_ result: EvaluationResult) {
+        stubbedResult = result
+    }
+
+    @discardableResult
+    func syncNow(reason: String) async throws -> EvaluationResult {
         syncNowCalled = true
         syncNowCallCount += 1
         if shouldThrowOnSync {
@@ -53,5 +78,12 @@ actor MockBackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
                 userInfo: [NSLocalizedDescriptionKey: "Mock sync error"]
             )
         }
+        return stubbedResult
+    }
+
+    func handleBackgroundRefresh(task: BGAppRefreshTask) async {
+        handleBackgroundRefreshCalled = true
+        handleBackgroundRefreshCallCount += 1
+        task.setTaskCompleted(success: true)
     }
 }

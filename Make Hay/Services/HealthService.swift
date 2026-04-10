@@ -14,6 +14,8 @@ import HealthKit
 /// **Why Actor?** HealthKit queries run on background threads, and we need to ensure
 /// thread-safe access to the HKHealthStore. An actor provides this isolation automatically.
 actor HealthService: HealthServiceProtocol {
+
+    private nonisolated static let traceCategory = "HealthService"
     
     // MARK: - Private Properties
     
@@ -95,27 +97,40 @@ actor HealthService: HealthServiceProtocol {
     /// treated as inconclusive and remains `.unconfirmed` rather than a false denial.
     var authorizationStatus: HealthAuthorizationStatus {
         get async {
+            AppLogger.trace(
+                category: Self.traceCategory,
+                message: "authorizationStatus query started."
+            )
             do {
                 let requestStatus = try await authorizationRequestStatus()
+                let resolvedStatus: HealthAuthorizationStatus
                 switch requestStatus {
                 case .shouldRequest:
                     // The user has never been prompted for these types.
-                    return .notDetermined
+                    resolvedStatus = .notDetermined
                 case .unnecessary:
                     // The prompt has already been shown. Probe for proven readable data
                     // because HealthKit hides whether read-only permission was granted.
                     let hasAccess = await probeHealthDataAccess()
-                    if hasAccess || Self.assumesAuthorizationOncePromptConsumed {
-                        return .authorized
-                    }
-
-                    return .unconfirmed
+                    resolvedStatus = hasAccess || Self.assumesAuthorizationOncePromptConsumed
+                        ? .authorized
+                        : .unconfirmed
                 case .unknown:
-                    return .notDetermined
+                    resolvedStatus = .notDetermined
                 @unknown default:
-                    return .notDetermined
+                    resolvedStatus = .notDetermined
                 }
+
+                AppLogger.trace(
+                    category: Self.traceCategory,
+                    message: "authorizationStatus query completed."
+                )
+                return resolvedStatus
             } catch {
+                AppLogger.trace(
+                    category: Self.traceCategory,
+                    message: "authorizationStatus query failed; using fallback."
+                )
                 return .notDetermined
             }
         }
@@ -123,17 +138,32 @@ actor HealthService: HealthServiceProtocol {
 
     var authorizationPromptShown: Bool {
         get async {
+            AppLogger.trace(
+                category: Self.traceCategory,
+                message: "authorizationPromptShown query started."
+            )
             do {
                 let requestStatus = try await authorizationRequestStatus()
+                let promptShown: Bool
                 switch requestStatus {
                 case .unnecessary:
-                    return true
+                    promptShown = true
                 case .shouldRequest, .unknown:
-                    return false
+                    promptShown = false
                 @unknown default:
-                    return false
+                    promptShown = false
                 }
+
+                AppLogger.trace(
+                    category: Self.traceCategory,
+                    message: "authorizationPromptShown query completed."
+                )
+                return promptShown
             } catch {
+                AppLogger.trace(
+                    category: Self.traceCategory,
+                    message: "authorizationPromptShown query failed; using fallback."
+                )
                 return false
             }
         }
@@ -148,9 +178,21 @@ actor HealthService: HealthServiceProtocol {
     /// only indicates the request completed, not that the user granted permission.
     /// The corrected `authorizationStatus` now queries HealthKit directly instead.
     func requestAuthorization() async throws {
+        AppLogger.trace(
+            category: Self.traceCategory,
+            message: "requestAuthorization started."
+        )
         do {
             try await healthStore.requestAuthorization(toShare: [], read: typesToRead)
+            AppLogger.trace(
+                category: Self.traceCategory,
+                message: "requestAuthorization completed successfully."
+            )
         } catch {
+            AppLogger.trace(
+                category: Self.traceCategory,
+                message: "requestAuthorization failed."
+            )
             throw HealthServiceError.authorizationDenied
         }
     }
@@ -168,6 +210,10 @@ actor HealthService: HealthServiceProtocol {
     /// before the user starts moving. A 7-day window reduces that, while still keeping the
     /// query bounded and fast.
     private func probeHealthDataAccess() async -> Bool {
+        AppLogger.trace(
+            category: Self.traceCategory,
+            message: "probeHealthDataAccess started."
+        )
         let now = Date()
         let sevenDaysAgo = Calendar.current.date(byAdding: .day, value: -7, to: now) ?? now
         async let stepsReadable = recentQuantityDataExists(
@@ -200,7 +246,12 @@ actor HealthService: HealthServiceProtocol {
             workoutReadable,
         ]
 
-        return readabilityChecks.contains(true)
+        let hasReadableData = readabilityChecks.contains(true)
+        AppLogger.trace(
+            category: Self.traceCategory,
+            message: "probeHealthDataAccess completed."
+        )
+        return hasReadableData
     }
 
     // MARK: - Data Fetching
@@ -209,14 +260,18 @@ actor HealthService: HealthServiceProtocol {
     /// - Returns: The cumulative step count from midnight to now.
     /// - Throws: `HealthServiceError.queryFailed` if the query encounters an error.
     func fetchDailySteps() async throws -> Int {
+        AppLogger.trace(
+            category: Self.traceCategory,
+            message: "fetchDailySteps started."
+        )
         let now = Date()
         let startOfDay = Calendar.current.startOfDay(for: now)
         
         let localStepType = stepType
         let localStore = healthStore
         
-        return try await withThrowingTimeout(seconds: Self.queryTimeoutSeconds) {
-            try await withCheckedThrowingContinuation { continuation in
+        let steps = try await withThrowingTimeout(seconds: Self.queryTimeoutSeconds) {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Int, Error>) in
                 let predicate = HKQuery.predicateForSamples(
                     withStart: startOfDay,
                     end: now,
@@ -239,19 +294,28 @@ actor HealthService: HealthServiceProtocol {
                 localStore.execute(query)
             }
         }
+        AppLogger.trace(
+            category: Self.traceCategory,
+            message: "fetchDailySteps completed."
+        )
+        return steps
     }
     
     /// Fetches the total active energy for the current day.
     /// - Returns: The cumulative active energy (kilocalories) from midnight to now.
     func fetchActiveEnergy() async throws -> Double {
+        AppLogger.trace(
+            category: Self.traceCategory,
+            message: "fetchActiveEnergy started."
+        )
         let now = Date()
         let startOfDay = Calendar.current.startOfDay(for: now)
         
         let localEnergyType = activeEnergyType
         let localStore = healthStore
         
-        return try await withThrowingTimeout(seconds: Self.queryTimeoutSeconds) {
-            try await withCheckedThrowingContinuation { continuation in
+        let activeEnergy = try await withThrowingTimeout(seconds: Self.queryTimeoutSeconds) {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Double, Error>) in
                 let predicate = HKQuery.predicateForSamples(
                     withStart: startOfDay,
                     end: now,
@@ -274,12 +338,21 @@ actor HealthService: HealthServiceProtocol {
                 localStore.execute(query)
             }
         }
+        AppLogger.trace(
+            category: Self.traceCategory,
+            message: "fetchActiveEnergy completed."
+        )
+        return activeEnergy
     }
     
     /// Fetches the total exercise minutes for the current day.
     /// If an activity type is provided, totals workout duration for that type.
     /// Otherwise, uses Apple's exercise time quantity.
     func fetchExerciseMinutes(for activityType: HKWorkoutActivityType?) async throws -> Int {
+        AppLogger.trace(
+            category: Self.traceCategory,
+            message: "fetchExerciseMinutes started."
+        )
         let now = Date()
         let startOfDay = Calendar.current.startOfDay(for: now)
         
@@ -288,8 +361,8 @@ actor HealthService: HealthServiceProtocol {
         let localStore = healthStore
         
         if let activityType {
-            return try await withThrowingTimeout(seconds: Self.queryTimeoutSeconds) {
-                try await withCheckedThrowingContinuation { continuation in
+            let minutes = try await withThrowingTimeout(seconds: Self.queryTimeoutSeconds) {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Int, Error>) in
                     let datePredicate = HKQuery.predicateForSamples(
                         withStart: startOfDay,
                         end: now,
@@ -318,9 +391,14 @@ actor HealthService: HealthServiceProtocol {
                     localStore.execute(query)
                 }
             }
+            AppLogger.trace(
+                category: Self.traceCategory,
+                message: "fetchExerciseMinutes completed."
+            )
+            return minutes
         } else {
-            return try await withThrowingTimeout(seconds: Self.queryTimeoutSeconds) {
-                try await withCheckedThrowingContinuation { continuation in
+            let minutes = try await withThrowingTimeout(seconds: Self.queryTimeoutSeconds) {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Int, Error>) in
                     let datePredicate = HKQuery.predicateForSamples(
                         withStart: startOfDay,
                         end: now,
@@ -343,6 +421,11 @@ actor HealthService: HealthServiceProtocol {
                     localStore.execute(query)
                 }
             }
+            AppLogger.trace(
+                category: Self.traceCategory,
+                message: "fetchExerciseMinutes completed."
+            )
+            return minutes
         }
     }
 
@@ -351,13 +434,22 @@ actor HealthService: HealthServiceProtocol {
     /// **Why async-let?** Steps and active energy queries are independent, so
     /// fetching concurrently reduces latency before guard decisions.
     func fetchCurrentData() async throws -> HealthCurrentData {
+        AppLogger.trace(
+            category: Self.traceCategory,
+            message: "fetchCurrentData started."
+        )
         async let steps = fetchDailySteps()
         async let activeEnergy = fetchActiveEnergy()
 
-        return try await HealthCurrentData(
+        let snapshot = try await HealthCurrentData(
             steps: steps,
             activeEnergy: activeEnergy
         )
+        AppLogger.trace(
+            category: Self.traceCategory,
+            message: "fetchCurrentData completed."
+        )
+        return snapshot
     }
     
     // MARK: - Private Helpers
@@ -392,7 +484,11 @@ actor HealthService: HealthServiceProtocol {
     }
 
     private func authorizationRequestStatus() async throws -> HKAuthorizationRequestStatus {
-        try await healthStore.statusForAuthorizationRequest(
+        AppLogger.trace(
+            category: Self.traceCategory,
+            message: "authorizationRequestStatus started."
+        )
+        return try await healthStore.statusForAuthorizationRequest(
             toShare: [],
             read: typesToRead
         )

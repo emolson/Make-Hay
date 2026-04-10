@@ -5,7 +5,6 @@
 //  Created by Ethan Olson on 12/31/25.
 //
 
-import os.log
 import SwiftUI
 
 /// The main tab-based navigation view for the app.
@@ -15,14 +14,14 @@ import SwiftUI
 /// a custom `EnvironmentKey`, so this view no longer couples to `AppDependencyContainer`.
 /// Child views read their own dependencies from the environment — no manual threading.
 ///
-/// **Why observe `scenePhase` here?** Background HealthKit delivery is best-effort and
-/// can be throttled by iOS. If the last successful evaluation is older than the staleness
-/// threshold when the app foregrounds, this root-level hook forces an immediate sync
-/// regardless of which tab is visible — preventing the user from staying blocked due
-/// to OS-level throttling.
+/// **Why observe `scenePhase` here?** This root-level hook always refreshes permission
+/// state on foreground resume, but only triggers a dashboard health sync when the
+/// Dashboard tab is visible. That keeps Settings responsive and avoids off-screen
+/// sync churn while still refreshing the data users are actively looking at.
 struct MainTabView: View {
 
-    private static let logger = AppLogger.logger(category: "MainTabView")
+    private static let minimumForegroundSyncInterval: TimeInterval = 5
+    private static let traceCategory = "MainTabView"
 
     /// Shared root tab selection state.
     /// **Why environment-backed?** This lets child views switch tabs without the app
@@ -30,7 +29,6 @@ struct MainTabView: View {
     @Environment(\.appNavigation) private var appNavigation
 
     @Environment(\.permissionManager) private var permissionManager
-    @Environment(\.backgroundHealthMonitor) private var backgroundHealthMonitor
     @Environment(\.dashboardViewModel) private var dashboardViewModel
 
     @Environment(\.scenePhase) private var scenePhase
@@ -38,6 +36,9 @@ struct MainTabView: View {
     /// Debounce task for foreground refresh, preventing rapid foreground/background
     /// transitions from triggering multiple syncs.
     @State private var foregroundRefreshTask: Task<Void, Never>?
+
+    /// Timestamp of the last foreground sync attempt.
+    @State private var lastForegroundSyncDate: Date?
     
     var body: some View {
         TabView(selection: Binding(
@@ -65,34 +66,68 @@ struct MainTabView: View {
                 .accessibilityIdentifier("settingsTab")
         }
         .onChange(of: scenePhase) { _, newPhase in
+            AppLogger.trace(
+                category: Self.traceCategory,
+                message: "scenePhase changed to \(String(describing: newPhase))."
+            )
+
             foregroundRefreshTask?.cancel()
 
             guard newPhase == .active else { return }
 
+            let refreshID = UUID().uuidString
             foregroundRefreshTask = Task {
                 try? await Task.sleep(for: .milliseconds(300))
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled else {
+                    AppLogger.trace(
+                        category: Self.traceCategory,
+                        message: "Foreground refresh cancelled during debounce. id=\(refreshID)"
+                    )
+                    return
+                }
+
+                let currentTab = appNavigation.selectedTab
+                let currentTabName = currentTab == .dashboard ? "dashboard" : "settings"
+
+                AppLogger.trace(
+                    category: Self.traceCategory,
+                    message: "Foreground refresh running. id=\(refreshID)"
+                )
 
                 // Always refresh permissions — the user may have returned from
                 // iOS Settings after toggling HealthKit or Screen Time access.
-                await permissionManager.refresh()
+                await permissionManager.refresh(reason: "mainTab.scenePhase.active.\(currentTabName)")
 
-                // Force a full sync only when background evaluation data is stale.
-                // Non-stale cases are handled by the dashboard's own scenePhase
-                // observer which does a lighter-weight goal reload.
-                guard SharedStorage.isEvaluationStale else { return }
-
-                do {
-                    try await backgroundHealthMonitor.syncNow()
-                } catch {
-                    // Best-effort; dashboard's own refresh path will also attempt
-                    // a load, and the Settings manual sync remains available.
-                    let _ = error
-                    Self.logger.warning("Foreground stale-data sync failed.")
+                // The Settings screen only needs fresh permission state on resume.
+                // Full health sync is deferred to the Dashboard or explicit manual refresh.
+                guard currentTab == .dashboard else {
+                    AppLogger.trace(
+                        category: Self.traceCategory,
+                        message: "Skipping foreground health sync because the selected tab is settings. id=\(refreshID)"
+                    )
+                    return
                 }
 
-                // Reload dashboard state so UI reflects the fresh evaluation.
-                await dashboardViewModel.loadGoals()
+                if let lastForegroundSyncDate,
+                   Date().timeIntervalSince(lastForegroundSyncDate) < Self.minimumForegroundSyncInterval {
+                    AppLogger.trace(
+                        category: Self.traceCategory,
+                        message: "Suppressing foreground health sync because cooldown is active. id=\(refreshID)"
+                    )
+                    return
+                }
+
+                lastForegroundSyncDate = Date()
+
+                // Unified sync: loadGoals() internally calls syncNow() which
+                // fetches health data, evaluates goals, updates shields, and
+                // persists the snapshot — all in one pipeline.
+                await dashboardViewModel.loadGoals(reason: "mainTab.scenePhase.active.dashboard")
+
+                AppLogger.trace(
+                    category: Self.traceCategory,
+                    message: "Foreground health sync finished. id=\(refreshID)"
+                )
             }
         }
     }

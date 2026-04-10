@@ -126,15 +126,17 @@ enum SharedStorage {
         case manualSync = "manualSync"
         case foregroundFallback = "foregroundFallback"
         case extensionUnlock = "extensionUnlock"
+        case backgroundRefresh = "backgroundRefresh"
     }
 
     /// How long since the last successful evaluation before the data is considered
     /// stale enough to justify a forced foreground sync.
     ///
-    /// **Why 2 hours?** HealthKit background delivery uses `.hourly` cadence, so
-    /// under normal conditions the app evaluates at least once per hour. Two hours
-    /// accommodates a single missed delivery without over-syncing on every foreground.
-    nonisolated static let stalenessThresholdSeconds: TimeInterval = 2 * 60 * 60
+    /// **Why 30 minutes?** HealthKit background delivery now uses `.immediate` cadence,
+    /// and `BGAppRefreshTask` provides an orthogonal wake every ~15 min. Under normal
+    /// conditions, evaluations happen within minutes of a HealthKit write. 30 minutes
+    /// accommodates system throttling under pressure without over-syncing.
+    nonisolated static let stalenessThresholdSeconds: TimeInterval = 30 * 60
 
     /// Timestamp of the last successful evaluation, or `nil` if no evaluation has
     /// completed yet.
@@ -191,5 +193,54 @@ enum SharedStorage {
     /// Records an evaluation failure reason. Does not update the timestamp.
     nonisolated static func recordEvaluationFailure(_ reason: EvaluationFailureReason) {
         lastEvaluationFailure = reason.rawValue
+    }
+
+    // MARK: - Day Tracking
+
+    /// Key for the start-of-day `Date` of the most recent evaluation.
+    private nonisolated static let lastEvaluationDayStartKey = "lastEvaluationDayStart"
+
+    /// The start-of-day `Date` for the most recent successful evaluation.
+    ///
+    /// **Why track this?** Midnight rollover detection: when the current day differs
+    /// from the stored day, yesterday's snapshot is stale and the evaluator re-engages
+    /// blocking so the user must re-earn their unlock for the new day.
+    nonisolated static var lastEvaluationDayStart: Date? {
+        get {
+            let interval = appGroupDefaults.double(forKey: lastEvaluationDayStartKey)
+            return interval > 0 ? Date(timeIntervalSince1970: interval) : nil
+        }
+        set {
+            if let date = newValue {
+                appGroupDefaults.set(date.timeIntervalSince1970, forKey: lastEvaluationDayStartKey)
+            } else {
+                appGroupDefaults.removeObject(forKey: lastEvaluationDayStartKey)
+            }
+        }
+    }
+
+    // MARK: - Evaluation Snapshot
+
+    /// Key for the JSON-encoded `EvaluationResult` written after each successful evaluation.
+    private nonisolated static let lastEvaluationSnapshotKey = "lastEvaluationSnapshot"
+
+    /// The most recent successful evaluation result, or `nil` if none has been persisted.
+    ///
+    /// **Why persist this?** The dashboard seeds its UI from this snapshot on cold start,
+    /// showing the last known steps/energy/blocking state instantly instead of zeros.
+    /// Also used by `GoalGatekeeper` for anti-cheat decisions without a fresh HealthKit
+    /// round-trip (the snapshot is at most seconds old after a foreground sync).
+    nonisolated static var lastEvaluationSnapshot: EvaluationResult? {
+        get {
+            guard let data = appGroupDefaults.data(forKey: lastEvaluationSnapshotKey) else { return nil }
+            return try? JSONDecoder().decode(EvaluationResult.self, from: data)
+        }
+        set {
+            if let value = newValue, let data = try? JSONEncoder().encode(value) {
+                appGroupDefaults.set(data, forKey: lastEvaluationSnapshotKey)
+            } else {
+                appGroupDefaults.removeObject(forKey: lastEvaluationSnapshotKey)
+            }
+        }
     }
 }

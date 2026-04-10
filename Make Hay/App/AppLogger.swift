@@ -31,4 +31,13 @@ enum AppLogger {
     nonisolated static func logger(category: String) -> Logger {
         Logger(subsystem: subsystem, category: category)
     }
+
+    /// Emits a privacy-safe debug trace to unified logging and, in debug builds,
+    /// mirrors it to stdout for fast Xcode console debugging.
+    nonisolated static func trace(category: String, message: String) {
+        logger(category: category).debug("\(message, privacy: .public)")
+#if DEBUG
+        print("[\(category)] \(message)")
+#endif
+    }
 }

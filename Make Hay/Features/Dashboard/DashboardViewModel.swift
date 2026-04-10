@@ -5,7 +5,6 @@
 //  Created by Ethan Olson on 12/31/25.
 //
 
-import HealthKit
 import os.log
 import SwiftUI
 
@@ -90,6 +89,8 @@ struct GoalProgress: Identifiable, Sendable, Equatable {
 @Observable
 @MainActor
 final class DashboardViewModel: GoalStatusProvider {
+
+    private nonisolated static let traceCategory = "DashboardViewModel"
     
     // MARK: - State
     
@@ -341,6 +342,7 @@ final class DashboardViewModel: GoalStatusProvider {
     
     private let healthService: any HealthServiceProtocol
     private let blockerService: any BlockerServiceProtocol
+    private let backgroundHealthMonitor: any BackgroundHealthMonitorProtocol
     private let timeUnlockScheduler: any TimeUnlockScheduling
 
     private static let logger = AppLogger.logger(category: "DashboardViewModel")
@@ -349,34 +351,56 @@ final class DashboardViewModel: GoalStatusProvider {
     @ObservationIgnored
     private var timeTickTask: Task<Void, Never>?
 
+    /// Re-entrancy flag for `loadGoals()`. Prevents multiple foreground / observer
+    /// triggers from stacking redundant `syncNow()` calls on the actor.
+    @ObservationIgnored
+    private var isSyncing = false
+
     // MARK: - Initialization
     
     /// Creates a new DashboardViewModel with the specified services.
     /// - Parameters:
-    ///   - healthService: The service to use for fetching health data.
+    ///   - healthService: The service to use for HealthKit authorization queries.
     ///   - blockerService: The service to use for managing app blocking.
-    ///   Both are injected as protocols to enable testing with mocks.
+    ///   - backgroundHealthMonitor: The single evaluation pipeline for health data fetching
+    ///     and shield updates.
+    ///   - timeUnlockScheduler: Scheduler for time-based goal device activity.
     init(
         healthService: any HealthServiceProtocol,
         blockerService: any BlockerServiceProtocol,
+        backgroundHealthMonitor: any BackgroundHealthMonitorProtocol = MockBackgroundHealthMonitor(),
         timeUnlockScheduler: (any TimeUnlockScheduling)? = nil
     ) {
         self.healthService = healthService
         self.blockerService = blockerService
+        self.backgroundHealthMonitor = backgroundHealthMonitor
         self.timeUnlockScheduler = timeUnlockScheduler ?? DeviceActivityTimeUnlockScheduler()
 
         refreshGoalFromStorage()
+
+        // Seed UI state from the last persisted evaluation snapshot so the dashboard
+        // renders real data instantly on cold start instead of zeros.
+        if let snapshot = SharedStorage.lastEvaluationSnapshot {
+            applyEvaluationResult(snapshot)
+        }
     }
     
     // MARK: - Actions
     
-    /// Called when the view appears. Loads goals and fetches health data.
+    /// Called when the view appears. Refreshes goal configuration and syncs health data.
     ///
-    /// **Why not always request authorization?** Calling `requestAuthorization()` on
-    /// every view mount is a redundant HealthKit daemon round-trip when permission has
-    /// already been proven. We only request authorization when it hasn't been granted
-    /// yet. Subsequent foreground resumes go through `loadGoals()` directly.
+    /// **Why no authorization request?** Permission management is handled by the
+    /// centralised `PermissionManager` at the `MainTabView` / `DashboardView` level.
+    /// This method focuses on goal housekeeping and data sync.
     func onAppear() async {
+        await onAppear(reason: "dashboard.onAppear")
+    }
+
+    func onAppear(reason: String) async {
+        AppLogger.trace(
+            category: Self.traceCategory,
+            message: "onAppear started. reason=\(reason)"
+        )
         refreshGoalFromStorage()
         do {
             _ = try await blockerService.applyPendingSelectionIfReady()
@@ -385,18 +409,37 @@ final class DashboardViewModel: GoalStatusProvider {
             Self.logger.warning("Failed to apply pending selection on appear.")
         }
         updateTimeTickTimer()
-
-        if SharedStorage.healthPermissionGranted {
-            await loadGoals()
-        } else {
-            await requestAuthorizationAndLoad()
-        }
+        await loadGoals(reason: reason)
     }
     
-    /// Fetches the current day's health metrics from HealthKit.
-    /// Updates current values, loading state, and error state.
-    /// Note: This assumes authorization has already been granted.
+    /// Fetches the current day's health metrics via the unified sync pipeline and
+    /// updates the dashboard UI state.
+    ///
+    /// **Why delegate to `backgroundHealthMonitor.syncNow()`?** This eliminates the
+    /// duplicate fetch → evaluate → shield-update pipeline that previously lived in the
+    /// ViewModel. The monitor is now the single source of truth for health data and
+    /// blocking decisions.
     func loadGoals() async {
+        await loadGoals(reason: "unspecified")
+    }
+
+    func loadGoals(reason: String) async {
+        // Prevent re-entrant calls from stacking redundant syncs.
+        guard !isSyncing else {
+            AppLogger.trace(
+                category: Self.traceCategory,
+                message: "loadGoals already in progress — skipping. reason=\(reason)"
+            )
+            return
+        }
+        isSyncing = true
+        defer { isSyncing = false }
+
+        AppLogger.trace(
+            category: Self.traceCategory,
+            message: "loadGoals started. reason=\(reason)"
+        )
+
         // Check if it's a new day before loading steps
         checkForNewDay()
         
@@ -416,52 +459,38 @@ final class DashboardViewModel: GoalStatusProvider {
         defer { isLoading = false }
         
         do {
-            let results = try await fetchEnabledGoals()
-            currentSteps = results.steps
-            currentActiveEnergy = results.activeEnergy
-            currentExerciseMinutes = results.exerciseMinutes
+            let result = try await backgroundHealthMonitor.syncNow(reason: "dashboard.loadGoals.\(reason)")
+            applyEvaluationResult(result)
             scheduleTimeUnlockIfNeeded()
             updateTimeTickTimer()
-            // Check and update blocking status after loading metrics
-            await checkGoalStatus()
+            AppLogger.trace(
+                category: Self.traceCategory,
+                message: "loadGoals completed successfully. reason=\(reason)"
+            )
+        } catch is CancellationError {
+            // External cancellation (e.g. foreground debounce) — not an error.
+            AppLogger.trace(
+                category: Self.traceCategory,
+                message: "loadGoals sync cancelled. reason=\(reason)"
+            )
         } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-    
-    /// Requests HealthKit authorization and then loads steps.
-    /// Use this when the user taps retry after an authorization error.
-    func requestAuthorizationAndLoad() async {
-        // Check if it's a new day before loading steps
-        checkForNewDay()
-        
-        isLoading = true
-        errorMessage = nil
-        
-        defer { isLoading = false }
-        
-        do {
-            try await healthService.requestAuthorization()
-            let promptShown = await healthService.authorizationPromptShown
-            let authorizationStatus = (await healthService.authorizationStatus).normalized(promptShown: promptShown)
-            SharedStorage.healthPermissionGranted = authorizationStatus.isAuthorized
-            SharedStorage.healthAuthorizationPromptShown = promptShown || authorizationStatus.promptHasBeenShown
-            refreshGoalFromStorage()
-            do {
-                _ = try await blockerService.applyPendingSelectionIfReady()
-            } catch {
-                let _ = error
-                Self.logger.warning("Failed to apply pending selection during auth flow.")
+            // On failure, only reuse a cached snapshot when it is still fresh
+            // for the current day. Otherwise keep the conservative local state
+            // (for example, the midnight reset to zero progress).
+            if let snapshot = SharedStorage.lastEvaluationSnapshot,
+               snapshot.isFreshForCurrentDay() {
+                applyEvaluationResult(snapshot)
+            } else {
+                isBlocking = GoalBlockingEvaluator.shouldBlock(
+                    goal: healthGoal,
+                    snapshot: goalEvaluationSnapshot()
+                )
             }
-            let results = try await fetchEnabledGoals()
-            currentSteps = results.steps
-            currentActiveEnergy = results.activeEnergy
-            currentExerciseMinutes = results.exerciseMinutes
-            scheduleTimeUnlockIfNeeded()
-            // Check and update blocking status after loading metrics
-            await checkGoalStatus()
-        } catch {
             errorMessage = error.localizedDescription
+            AppLogger.trace(
+                category: Self.traceCategory,
+                message: "loadGoals failed with surfaced error. reason=\(reason)"
+            )
         }
     }
     
@@ -597,15 +626,15 @@ final class DashboardViewModel: GoalStatusProvider {
 
         let intent = GoalChangeIntent.determine(original: currentGoal, proposed: proposedGoal)
 
-        if intent == .easier, await shouldDeferGoalEdits() {
+        if intent == .easier, shouldDeferGoalEdits() {
             return .deferred(proposedGoal)
         }
         return .applyImmediately
     }
 
     /// Removes a goal of the specified type.
-    /// **Why save and check status?** Removing a goal disables it in the model,
-    /// persists the change, and recalculates whether apps should be blocked.
+    /// **Why save and sync?** Removing a goal disables it in the model,
+    /// persists the change, and triggers a sync to re-evaluate blocking.
     /// - Parameters:
     ///   - type: The type of goal to remove.
     ///   - exerciseGoalId: The ID of the exercise goal to remove (only used for exercise goals).
@@ -627,8 +656,8 @@ final class DashboardViewModel: GoalStatusProvider {
         scheduleTimeUnlockIfNeeded()
         updateTimeTickTimer()
         
-        // Re-check blocking status after removing a goal
-        await checkGoalStatus()
+        // Re-evaluate blocking status after removing a goal
+        await syncAndApply()
     }
     
     /// Updates an existing goal's target value.
@@ -664,7 +693,7 @@ final class DashboardViewModel: GoalStatusProvider {
         // Ensure time-based goals are rescheduled and blocking status is refreshed
         scheduleTimeUnlockIfNeeded()
         updateTimeTickTimer()
-        await checkGoalStatus()
+        await syncAndApply()
     }
     
     /// Schedules per-goal pending changes to take effect tomorrow at midnight.
@@ -752,7 +781,7 @@ final class DashboardViewModel: GoalStatusProvider {
         
         // Update blocking status with the new goal
         scheduleTimeUnlockIfNeeded()
-        await checkGoalStatus()
+        await syncAndApply()
     }
     
     /// Cancels all pending goal changes.
@@ -764,14 +793,12 @@ final class DashboardViewModel: GoalStatusProvider {
 
     /// Returns whether easier goal edits should be deferred behind the pending-change flow.
     ///
-    /// **Why fresh evaluation?** Goal edits are a high-impact path. We evaluate with
-    /// current Health data at action time to avoid stale UI state bypassing the gate.
-    func shouldDeferGoalEdits() async -> Bool {
+    /// **Why use cached snapshot?** The evaluation snapshot is at most seconds old after
+    /// a foreground sync. Using it avoids a redundant HealthKit round-trip and keeps
+    /// the anti-cheat gate consistent with the data already displayed.
+    func shouldDeferGoalEdits() -> Bool {
         let latestGoal = HealthGoal.load()
-        return await GoalGatekeeper.shouldDeferEdits(
-            goal: latestGoal,
-            healthService: healthService
-        )
+        return GoalGatekeeper.shouldDeferEdits(goal: latestGoal)
     }
 
     // MARK: - Private Methods
@@ -803,7 +830,7 @@ final class DashboardViewModel: GoalStatusProvider {
     /// still have apps unblocked from yesterday. This function detects the date change
     /// and re-engages the block to ensure users start each day locked until they meet their goal.
     /// **Design:** Synchronous date comparison with immediate state update. The subsequent
-    /// async health fetch will trigger blocking via `checkGoalStatus()`.
+    /// async sync pipeline will fetch today's data and refresh the shield state.
     private func checkForNewDay() {
         let currentDayNumber = Calendar.current.ordinality(of: .day, in: .era, for: Date()) ?? 0
         
@@ -824,38 +851,35 @@ final class DashboardViewModel: GoalStatusProvider {
         }
     }
     
-    /// Checks the user's progress toward their goal and updates app blocking accordingly.
-    /// **Why this is the "gate"?** This is where health achievement (the "key") controls
-    /// app access (the "lock"). If steps < goal, apps are blocked. If goal is met, access is granted.
-    /// **Why do-catch with warning?** Shield update failures shouldn't prevent the UI from
-    /// showing health data, but they must not be invisible. A failed shield update means
-    /// the blocking state may be out of sync with the user's progress. We log the error
-    /// and surface a non-blocking `shieldWarning` so the user knows to retry.
-    /// - Returns: True if blocking state changed from blocked to unblocked (goal achieved)
-    @discardableResult
-    private func checkGoalStatus() async -> Bool {
-        let shouldBlock = GoalBlockingEvaluator.shouldBlock(
-            goal: healthGoal,
-            snapshot: goalEvaluationSnapshot()
-        )
-        let wasBlocking = isBlocking
-        
-        do {
-            try await blockerService.updateShields(shouldBlock: shouldBlock)
-            isBlocking = shouldBlock
-            shieldWarning = nil
-        } catch {
-            let _ = shouldBlock
-            Self.logger.error("Shield update failed.")
-            shieldWarning = error.localizedDescription
-            // Keep the previous isBlocking state since the shield update failed —
-            // the actual shield state on-device is unchanged.
-        }
-        
-        // Return true if we transitioned from blocked to unblocked (goal achieved!)
-        return wasBlocking && !isBlocking
+    /// Applies an evaluation result to the dashboard's observable state.
+    ///
+    /// **Why this method?** Centralises the mapping from `EvaluationResult` to UI state.
+    /// Called after `syncNow()`, when seeding from a persisted snapshot on init, and as
+    /// a fallback when a sync fails.
+    func applyEvaluationResult(_ result: EvaluationResult) {
+        currentSteps = result.steps
+        currentActiveEnergy = result.activeEnergy
+        currentExerciseMinutes = result.exerciseMinutesByGoalId
+        isBlocking = result.shouldBlock
+        shieldWarning = nil
     }
-    
+
+    /// Runs a sync via the background monitor and applies the result to UI state.
+    ///
+    /// **Why a helper?** Goal mutations (add, remove, update, emergency change) all
+    /// need to re-evaluate blocking after persisting the goal change. This avoids
+    /// duplicating the try/catch + fallback pattern.
+    private func syncAndApply() async {
+        do {
+            let result = try await backgroundHealthMonitor.syncNow(reason: "dashboard.goalMutation")
+            applyEvaluationResult(result)
+        } catch {
+            // Shield update failed — surface as a non-blocking warning.
+            Self.logger.error("Sync after goal mutation failed.")
+            shieldWarning = error.localizedDescription
+        }
+    }
+
     /// Reloads the latest health goal from shared storage.
     private func refreshGoalFromStorage() {
         healthGoal = HealthGoal.load()
@@ -906,86 +930,5 @@ final class DashboardViewModel: GoalStatusProvider {
             exerciseMinutesByGoalId: currentExerciseMinutes,
             currentMinutesSinceMidnight: currentMinutesSinceMidnight()
         )
-    }
-
-    private func fetchEnabledGoals() async throws -> (steps: Int, activeEnergy: Double, exerciseMinutes: [UUID: Int]) {
-        var results = (steps: 0, activeEnergy: 0.0, exerciseMinutes: [UUID: Int]())
-        var authorizationError: Error?
-        
-        await withTaskGroup(of: (GoalType, Double, UUID?, Error?).self) { group in
-            if healthGoal.stepGoal.isEnabled {
-                group.addTask {
-                    do {
-                        let steps = try await self.healthService.fetchDailySteps()
-                        return (.steps, Double(steps), nil, nil)
-                    } catch {
-                        // Only propagate authorization errors, treat missing data as 0
-                        if case HealthServiceError.authorizationDenied = error {
-                            return (.steps, 0, nil, error)
-                        }
-                        return (.steps, 0, nil, nil)
-                    }
-                }
-            }
-            
-            if healthGoal.activeEnergyGoal.isEnabled {
-                group.addTask {
-                    do {
-                        let energy = try await self.healthService.fetchActiveEnergy()
-                        return (.activeEnergy, energy, nil, nil)
-                    } catch {
-                        // Only propagate authorization errors, treat missing data as 0
-                        if case HealthServiceError.authorizationDenied = error {
-                            return (.activeEnergy, 0, nil, error)
-                        }
-                        return (.activeEnergy, 0, nil, nil)
-                    }
-                }
-            }
-            
-            // Fetch data for each enabled exercise goal
-            for exerciseGoal in healthGoal.exerciseGoals where exerciseGoal.isEnabled {
-                let goalId = exerciseGoal.id
-                let activityType = exerciseGoal.exerciseType.hkWorkoutActivityType
-                group.addTask {
-                    do {
-                        let minutes = try await self.healthService.fetchExerciseMinutes(for: activityType)
-                        return (.exercise, Double(minutes), goalId, nil)
-                    } catch {
-                        // Only propagate authorization errors, treat missing data as 0
-                        if case HealthServiceError.authorizationDenied = error {
-                            return (.exercise, 0, goalId, error)
-                        }
-                        return (.exercise, 0, goalId, nil)
-                    }
-                }
-            }
-            
-            for await (type, value, goalId, error) in group {
-                if let error = error {
-                    authorizationError = error
-                }
-                
-                switch type {
-                case .steps:
-                    results.steps = Int(value)
-                case .activeEnergy:
-                    results.activeEnergy = value
-                case .exercise:
-                    if let goalId {
-                        results.exerciseMinutes[goalId] = Int(value)
-                    }
-                case .timeUnlock:
-                    break // Time-based goals don't fetch from HealthKit
-                }
-            }
-        }
-        
-        // Only throw if we encountered an actual authorization error
-        if let authorizationError {
-            throw authorizationError
-        }
-        
-        return results
     }
 }

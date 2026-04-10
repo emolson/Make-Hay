@@ -489,6 +489,7 @@
 				DEVELOPMENT_TEAM = 6VQ42S7UGS;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Make Hay reads your health and activity data to determine if you have met your daily fitness goals, which is required to unlock your restricted apps.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Make Hay does not write health data, but requires this to evaluate your fitness goals and unlock your restricted apps.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -524,6 +525,7 @@
 				DEVELOPMENT_TEAM = 6VQ42S7UGS;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Make Hay reads your health and activity data to determine if you have met your daily fitness goals, which is required to unlock your restricted apps.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Make Hay does not write health data, but requires this to evaluate your fitness goals and unlock your restricted apps.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

@@ -419,6 +419,15 @@ struct GoalEvaluationSnapshot: Sendable {
     var currentMinutesSinceMidnight: Int
 }
 
+extension EvaluationResult {
+    /// Returns whether the cached evaluation snapshot is still trustworthy for
+    /// guard decisions on the current day.
+    nonisolated func isFreshForCurrentDay(now: Date = Date()) -> Bool {
+        guard !SharedStorage.isEvaluationStale else { return false }
+        return Calendar.current.isDate(timestamp, inSameDayAs: now)
+    }
+}
+
 /// Shared evaluator for determining whether goals are currently met.
 ///
 /// **Why centralize this logic?** Goal edit gating and blocked-app edit gating
@@ -486,47 +495,36 @@ enum GoalBlockingEvaluator {
 
 /// Shared gatekeeper used by multiple features before applying easier edits.
 ///
-/// **Policy:** If fresh health reads fail, default to deferral so users cannot
-/// bypass goal guards due to transient fetch failures.
+/// **Policy:** If no cached evaluation snapshot is available, default to deferral
+/// so users cannot bypass goal guards due to missing data.
 enum GoalGatekeeper {
+    /// Determines whether edits should be deferred using the latest persisted
+    /// evaluation snapshot.
+    ///
+    /// **Why no HealthService parameter?** The background monitor now persists an
+    /// `EvaluationResult` after every sync. Using that snapshot avoids a redundant
+    /// HealthKit round-trip — the data is at most seconds old after a foreground sync.
     nonisolated static func shouldDeferEdits(
         goal: HealthGoal,
-        healthService: any HealthServiceProtocol,
         now: Date = Date()
-    ) async -> Bool {
-        do {
-            let currentData = try await healthService.fetchCurrentData()
-            let exerciseMinutes = try await fetchExerciseMinutesByGoalId(
-                goal: goal,
-                healthService: healthService
-            )
-            let snapshot = GoalEvaluationSnapshot(
-                steps: currentData.steps,
-                activeEnergy: currentData.activeEnergy,
-                exerciseMinutesByGoalId: exerciseMinutes,
-                currentMinutesSinceMidnight: currentMinutesSinceMidnight(date: now)
-            )
-
-            return GoalBlockingEvaluator.shouldDeferChanges(goal: goal, snapshot: snapshot)
-        } catch {
+    ) -> Bool {
+        guard let snapshot = SharedStorage.lastEvaluationSnapshot else {
+            // No cached data — fail closed (defer).
             return true
         }
-    }
 
-    private nonisolated static func fetchExerciseMinutesByGoalId(
-        goal: HealthGoal,
-        healthService: any HealthServiceProtocol
-    ) async throws -> [UUID: Int] {
-        var result: [UUID: Int] = [:]
-
-        for exerciseGoal in goal.exerciseGoals where exerciseGoal.isEnabled {
-            let minutes = try await healthService.fetchExerciseMinutes(
-                for: exerciseGoal.exerciseType.hkWorkoutActivityType
-            )
-            result[exerciseGoal.id] = minutes
+        guard snapshot.isFreshForCurrentDay(now: now) else {
+            return true
         }
 
-        return result
+        let evalSnapshot = GoalEvaluationSnapshot(
+            steps: snapshot.steps,
+            activeEnergy: snapshot.activeEnergy,
+            exerciseMinutesByGoalId: snapshot.exerciseMinutesByGoalId,
+            currentMinutesSinceMidnight: currentMinutesSinceMidnight(date: now)
+        )
+
+        return GoalBlockingEvaluator.shouldDeferChanges(goal: goal, snapshot: evalSnapshot)
     }
 
     private nonisolated static func currentMinutesSinceMidnight(date: Date) -> Int {

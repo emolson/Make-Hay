@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import BackgroundTasks
 import HealthKit
 import os.log
 
@@ -45,7 +46,8 @@ final class AppDependencyContainer {
     /// Shared dashboard view model used across tabs for consistent gate state.
     lazy var dashboardViewModel: DashboardViewModel = DashboardViewModel(
         healthService: healthService,
-        blockerService: blockerService
+        blockerService: blockerService,
+        backgroundHealthMonitor: backgroundHealthMonitor
     )
 
     /// Shared root navigation state used for programmatic tab switching.
@@ -110,9 +112,35 @@ final class AppDependencyContainer {
             await monitor.startMonitoring()
         }
 
+        // Register the BGAppRefreshTask handler. This must happen during app launch
+        // before the end of the first `applicationDidFinishLaunching` cycle. The handler
+        // will be invoked by iOS when it decides to wake the app for a background refresh,
+        // providing an orthogonal wake path independent of HealthKit daemon health.
+        Self.registerBackgroundRefreshTask(monitor: monitor)
+
         // Validate App Group wiring early so misconfigured entitlements fail loudly
         // during development instead of silently desyncing cross-process state.
         Self.validateAppGroupConfiguration()
+    }
+
+    // MARK: - Background Task Registration
+
+    /// Registers the `BGAppRefreshTask` handler with the system's `BGTaskScheduler`.
+    ///
+    /// **Why a static method?** Registration must happen exactly once during app launch,
+    /// and the handler captures the monitor by reference. Keeping this separate makes the
+    /// init body cleaner and the registration testable in isolation.
+    private static func registerBackgroundRefreshTask(monitor: any BackgroundHealthMonitorProtocol) {
+        BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: BackgroundHealthMonitor.backgroundRefreshTaskIdentifier,
+            using: nil
+        ) { task in
+            guard let refreshTask = task as? BGAppRefreshTask else { return }
+            Task {
+                await monitor.handleBackgroundRefresh(task: refreshTask)
+            }
+        }
+        logger.info("Registered BGAppRefreshTask handler.")
     }
 
     // MARK: - Private

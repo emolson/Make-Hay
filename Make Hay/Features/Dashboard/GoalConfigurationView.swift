@@ -397,12 +397,7 @@ struct GoalConfigurationView: View {
             // Determine the intent of this change
             let intent = GoalChangeIntent.determine(original: currentGoal, proposed: newGoal)
 
-            let shouldDefer: Bool
-            if intent == .easier {
-                shouldDefer = await viewModel.shouldDeferGoalEdits()
-            } else {
-                shouldDefer = false
-            }
+            let shouldDefer = intent == .easier && viewModel.shouldDeferGoalEdits()
             
             // If making goal easier while apps are blocked, show confirmation
             if shouldDefer {
@@ -458,12 +453,7 @@ struct GoalConfigurationView: View {
             // Determine intent (removal is always "easier")
             let intent = GoalChangeIntent.determine(original: currentGoal, proposed: newGoal)
 
-            let shouldDefer: Bool
-            if intent == .easier {
-                shouldDefer = await viewModel.shouldDeferGoalEdits()
-            } else {
-                shouldDefer = false
-            }
+            let shouldDefer = intent == .easier && viewModel.shouldDeferGoalEdits()
             
             if shouldDefer {
                 pendingProposal = PendingGoalProposal(goal: newGoal)

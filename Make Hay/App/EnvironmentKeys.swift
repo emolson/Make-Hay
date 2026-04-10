@@ -63,7 +63,8 @@ private struct PermissionManagerKey: EnvironmentKey {
 private struct DashboardViewModelKey: EnvironmentKey {
     @MainActor static let defaultValue: DashboardViewModel = DashboardViewModel(
         healthService: MockHealthService(),
-        blockerService: MockBlockerService()
+        blockerService: MockBlockerService(),
+        backgroundHealthMonitor: MockBackgroundHealthMonitor()
     )
 }
 

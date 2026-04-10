@@ -41,19 +41,17 @@ struct DashboardView: View {
     @Environment(\.appNavigation) private var appNavigation
     
     /// Tracks the current scene phase to respond to app lifecycle events.
-    /// **Why observe scenePhase?** We need to refresh health data and check the gate
-    /// every time the app comes to the foreground. This ensures blocking status stays
-    /// in sync with health data even if the user walks outside the app.
+    /// **Why observe scenePhase?** We need to refresh the time-tick timer
+    /// when the app comes back to the foreground so the time-block progress
+    /// bar resumes updating.
     @Environment(\.scenePhase) private var scenePhase
     
     /// Tracks whether to trigger celebration haptic feedback.
     /// Set to true when the user achieves their goal, triggering a success haptic.
     @State private var triggerSuccessHaptic: Bool = false
-    
-    /// Reference to the scene phase update task for debouncing.
-    /// **Why debounce?** Prevents unnecessary API calls during rapid app switching
-    /// or multitasking scenarios where the app may foreground/background quickly.
-    @State private var scenePhaseTask: Task<Void, Never>?
+
+    /// Tracks the previous value of `isGoalMet` for reactive haptic detection.
+    @State private var previousGoalMet: Bool = false
     
     /// Tracks the goal currently being edited (nil when not editing).
     @State private var editingGoal: GoalProgress?
@@ -108,37 +106,27 @@ struct DashboardView: View {
                     }
                 }
                 .task {
-                    await permissionManager.refresh()
-                    await viewModel.onAppear()
+                    await permissionManager.refresh(reason: "dashboard.task")
+                    await viewModel.onAppear(reason: "dashboard.task")
                 }
                 .onDisappear {
                     // Stop the 60-second tick timer to avoid unnecessary work
                     // while the dashboard is off-screen.
                     viewModel.stopTimeTickTimer()
-                    scenePhaseTask?.cancel()
-                    scenePhaseTask = nil
                 }
                 .onChange(of: scenePhase) { _, newPhase in
-                    // Cancel any pending scene phase task to debounce rapid changes
-                    scenePhaseTask?.cancel()
-                    
                     if newPhase == .active {
-                        // Debounce with a small delay to handle rapid transitions
-                        scenePhaseTask = Task {
-                            try? await Task.sleep(for: .milliseconds(300))
-                            guard !Task.isCancelled else { return }
-
-                            // Permission refresh and stale-data sync happen at the
-                            // MainTabView root level so they fire regardless of which
-                            // tab is active. Here we only reload goal UI state.
-                            let previousGoalMet = viewModel.isGoalMet
-                            await viewModel.loadGoals()
-                            
-                            // Trigger haptic if goal was just achieved
-                            if !previousGoalMet && viewModel.isGoalMet {
-                                triggerSuccessHaptic = true
-                            }
-                        }
+                        // Resume the time-tick timer when returning to
+                        // foreground. Health data sync is handled by
+                        // MainTabView's unified scenePhase handler.
+                        viewModel.updateTimeTickTimer()
+                    }
+                }
+                .onChange(of: viewModel.isGoalMet) { oldValue, newValue in
+                    // Trigger haptic when goal transitions from not-met to met,
+                    // regardless of which code path caused the change.
+                    if !oldValue && newValue {
+                        triggerSuccessHaptic = true
                     }
                 }
                 .sensoryFeedback(.success, trigger: triggerSuccessHaptic)
@@ -310,7 +298,7 @@ struct DashboardView: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .refreshable {
-            await viewModel.loadGoals()
+            await viewModel.loadGoals(reason: "dashboard.pullToRefresh")
         }
         .accessibilityIdentifier("Dashboard.goalsList")
     }
@@ -415,7 +403,7 @@ struct DashboardView: View {
             Spacer()
 
             Button {
-                Task { await viewModel.loadGoals() }
+                Task { await viewModel.loadGoals(reason: "dashboard.shieldWarningRetry") }
             } label: {
                 Text(String(localized: "Retry"))
                     .font(.caption)
@@ -452,7 +440,7 @@ struct DashboardView: View {
             Spacer()
 
             Button {
-                Task { await viewModel.loadGoals() }
+                Task { await viewModel.loadGoals(reason: "dashboard.staleDataRetry") }
             } label: {
                 Text(String(localized: "Retry"))
                     .font(.caption)
@@ -524,7 +512,7 @@ struct DashboardView: View {
             
             Button {
                 Task {
-                    await viewModel.requestAuthorizationAndLoad()
+                    await viewModel.loadGoals(reason: "dashboard.errorRetry")
                 }
             } label: {
                 Text(String(localized: "Retry"))

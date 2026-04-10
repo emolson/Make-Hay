@@ -27,6 +27,8 @@ import Foundation
 @MainActor
 final class PermissionManager: PermissionManaging {
 
+    private nonisolated static let traceCategory = "PermissionManager"
+
     // MARK: - State
 
     /// Current HealthKit authorization status, refreshed on every `refresh()` call.
@@ -56,6 +58,11 @@ final class PermissionManager: PermissionManaging {
     /// app-switch) is tolerated; after the threshold is reached the downgrade is
     /// accepted, which detects a real permission revocation.
     private var consecutiveUnconfirmedCount: Int = 0
+
+    /// Re-entrancy flag for `refresh()`. Prevents interleaved
+    /// `async let` probes from double-incrementing `consecutiveUnconfirmedCount`
+    /// on a single foreground resume.
+    private var isRefreshing = false
 
     /// Number of consecutive `.unconfirmed` probes required before downgrading a
     /// previously `.authorized` status. Low enough to detect real revocations within
@@ -101,6 +108,30 @@ final class PermissionManager: PermissionManaging {
     /// **Why a dedicated method?** Called on view appear *and* on every foreground resume
     /// so the banner reacts within one frame if the user toggled permissions in Settings.
     func refresh() async {
+        await refresh(reason: "unspecified")
+    }
+
+    /// Queries both services for their current authorization state with a caller-supplied
+    /// reason string so foreground/resume loops can be traced precisely.
+    func refresh(reason: String) async {
+        // Prevent re-entrant probes from racing and double-incrementing
+        // the unconfirmed counter on a single foreground resume.
+        guard !isRefreshing else {
+            AppLogger.trace(
+                category: Self.traceCategory,
+                message: "Permission refresh skipped because another refresh is already running. reason=\(reason)"
+            )
+            return
+        }
+
+        isRefreshing = true
+        defer { isRefreshing = false }
+
+        AppLogger.trace(
+            category: Self.traceCategory,
+            message: "Permission refresh started. reason=\(reason)"
+        )
+
         async let latestHealthStatus = healthService.authorizationStatus
         async let latestHealthPromptShown = healthService.authorizationPromptShown
         let latestScreenTime = await blockerService.isAuthorized
@@ -136,6 +167,11 @@ final class PermissionManager: PermissionManaging {
         SharedStorage.healthPermissionGranted = latestHealth.isAuthorized
         SharedStorage.healthAuthorizationPromptShown = healthAuthorizationPromptShown
         SharedStorage.screenTimePermissionGranted = latestScreenTime
+
+        AppLogger.trace(
+            category: Self.traceCategory,
+            message: "Permission refresh finished. reason=\(reason)"
+        )
     }
 
     /// Requests HealthKit authorization, refreshes stored state, and returns the
