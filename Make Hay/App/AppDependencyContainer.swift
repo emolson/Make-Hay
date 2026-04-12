@@ -130,14 +130,17 @@ final class AppDependencyContainer {
     /// **Why a static method?** Registration must happen exactly once during app launch,
     /// and the handler captures the monitor by reference. Keeping this separate makes the
     /// init body cleaner and the registration testable in isolation.
-    private static func registerBackgroundRefreshTask(monitor: any BackgroundHealthMonitorProtocol) {
+    nonisolated private static func registerBackgroundRefreshTask(
+        monitor: any BackgroundHealthMonitorProtocol
+    ) {
         BGTaskScheduler.shared.register(
             forTaskWithIdentifier: BackgroundHealthMonitor.backgroundRefreshTaskIdentifier,
             using: nil
         ) { task in
             guard let refreshTask = task as? BGAppRefreshTask else { return }
+            let refreshContext = BackgroundRefreshTaskContext(task: refreshTask)
             Task {
-                await monitor.handleBackgroundRefresh(task: refreshTask)
+                await monitor.handleBackgroundRefresh(task: refreshContext)
             }
         }
         logger.info("Registered BGAppRefreshTask handler.")
@@ -145,7 +148,7 @@ final class AppDependencyContainer {
 
     // MARK: - Private
 
-    private static let logger = AppLogger.logger(category: "AppDependencyContainer")
+    nonisolated private static let logger = AppLogger.logger(category: "AppDependencyContainer")
 
     /// One-time sanity check that the App Group container and UserDefaults suite are
     /// both reachable. Logs a fault and asserts in debug builds if either is missing.

@@ -106,7 +106,12 @@ final class AppPickerViewModel {
     /// Called once from the view's `.task` modifier on first appear.
     func loadCurrentSelection() async {
         _ = try? await blockerService.applyPendingSelectionIfReady()
-        persistedSelection = await blockerService.getSelection()
+        let persistedSnapshot = await blockerService.getSelection()
+        do {
+            persistedSelection = try persistedSnapshot.decodedSelection()
+        } catch {
+            persistedSelection = FamilyActivitySelection()
+        }
         draftSelection = persistedSelection
     }
 
@@ -141,8 +146,9 @@ final class AppPickerViewModel {
         defer { isSaving = false }
 
         do {
+            let pendingSelectionSnapshot = try AppSelectionSnapshot(selection: pendingSelectionCandidate)
             try await blockerService.setPendingSelection(
-                pendingSelectionCandidate,
+                pendingSelectionSnapshot,
                 effectiveDate: Date.localMidnightTomorrow()
             )
             self.pendingSelectionCandidate = nil
@@ -214,7 +220,8 @@ final class AppPickerViewModel {
 
         do {
             await blockerService.cancelPendingSelection()
-            try await blockerService.setSelection(selection)
+            let selectionSnapshot = try AppSelectionSnapshot(selection: selection)
+            try await blockerService.setSelection(selectionSnapshot)
             let hasApps = !selection.applicationTokens.isEmpty || !selection.categoryTokens.isEmpty
             // Only block if apps are selected AND the user hasn't already met their goals.
             let shouldBlock = hasApps && goalStatusProvider.isBlocking

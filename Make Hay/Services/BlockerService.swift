@@ -8,6 +8,7 @@
 import FamilyControls
 import Foundation
 import ManagedSettings
+import os.log
 
 /// Actor responsible for managing Screen Time app blocking using FamilyControls and ManagedSettings.
 ///
@@ -34,11 +35,19 @@ actor BlockerService: BlockerServiceProtocol {
     /// The user's current app selection for blocking.
     private var selection: FamilyActivitySelection = FamilyActivitySelection()
 
+    /// Cached serialized snapshot for cross-actor reads.
+    private var selectionSnapshot: AppSelectionSnapshot = .empty
+
     /// Pending app selection scheduled for future application.
     private var pendingSelection: FamilyActivitySelection?
 
+    /// Cached serialized snapshot for deferred pending selection reads.
+    private var pendingSelectionSnapshot: AppSelectionSnapshot?
+
     /// Effective date for applying `pendingSelection`.
     private var pendingSelectionEffectiveDate: Date?
+
+    private nonisolated static let logger = AppLogger.logger(category: "BlockerService")
     
     // MARK: - BlockerServiceProtocol
     
@@ -62,7 +71,17 @@ actor BlockerService: BlockerServiceProtocol {
 
         // Load persisted selection on initialization without crossing actor isolation.
         self.selection = repository.loadSelection()
+        self.selectionSnapshot = Self.snapshotOrEmpty(
+            from: self.selection,
+            context: "active selection initialization"
+        )
         self.pendingSelection = repository.loadPendingSelection()
+        if let pendingSelection = self.pendingSelection {
+            self.pendingSelectionSnapshot = Self.snapshotOrEmpty(
+                from: pendingSelection,
+                context: "pending selection initialization"
+            )
+        }
         self.pendingSelectionEffectiveDate = repository.loadPendingSelectionDate()
         
         // **Safety net:** If authorization was revoked while the app was closed,
@@ -138,16 +157,19 @@ actor BlockerService: BlockerServiceProtocol {
     /// restarts so the blocking configuration remains intact. Since iOS 16+,
     /// `FamilyActivitySelection` conforms to `Codable`, allowing PropertyList encoding.
     ///
-    /// - Parameter selection: The apps and categories selected for blocking.
+    /// - Parameter selection: Serialized apps/categories selected for blocking.
     /// - Throws: `BlockerServiceError.configurationUpdateFailed` if persistence fails.
-    func setSelection(_ selection: FamilyActivitySelection) async throws {
+    func setSelection(_ selection: AppSelectionSnapshot) async throws {
         do {
-            try repository.saveSelection(selection)
+            let decodedSelection = try selection.decodedSelection()
+            try repository.saveSelection(decodedSelection)
             repository.clearPendingSelection()
             // Commit in-memory state only after persistence succeeds so the
             // actor and disk stay in sync on failure.
-            self.selection = selection
+            self.selection = decodedSelection
+            selectionSnapshot = selection
             pendingSelection = nil
+            pendingSelectionSnapshot = nil
             pendingSelectionEffectiveDate = nil
         } catch {
             throw BlockerServiceError.configurationUpdateFailed
@@ -155,17 +177,18 @@ actor BlockerService: BlockerServiceProtocol {
     }
     
     /// Retrieves the current app selection.
-    /// - Returns: The stored `FamilyActivitySelection`, or an empty selection if none exists.
-    func getSelection() async -> FamilyActivitySelection {
-        _ = try? await applyPendingSelectionIfReady()
-        return selection
+    /// - Returns: The stored selection as a sendable serialized snapshot.
+    func getSelection() async -> AppSelectionSnapshot {
+        selectionSnapshot
     }
 
     /// Stores a pending selection and effective date for deferred application.
-    func setPendingSelection(_ selection: FamilyActivitySelection, effectiveDate: Date) async throws {
+    func setPendingSelection(_ selection: AppSelectionSnapshot, effectiveDate: Date) async throws {
         do {
-            try repository.savePendingSelection(selection, effectiveDate: effectiveDate)
-            pendingSelection = selection
+            let decodedSelection = try selection.decodedSelection()
+            try repository.savePendingSelection(decodedSelection, effectiveDate: effectiveDate)
+            pendingSelection = decodedSelection
+            pendingSelectionSnapshot = selection
             pendingSelectionEffectiveDate = effectiveDate
         } catch {
             throw BlockerServiceError.configurationUpdateFailed
@@ -174,13 +197,13 @@ actor BlockerService: BlockerServiceProtocol {
 
     /// Returns pending selection payload if one is currently scheduled.
     func getPendingSelection() async -> PendingAppSelection? {
-        guard let pendingSelection,
+        guard let pendingSelectionSnapshot,
               let pendingSelectionEffectiveDate else {
             return nil
         }
 
         return PendingAppSelection(
-            selection: pendingSelection,
+            selection: pendingSelectionSnapshot,
             effectiveDate: pendingSelectionEffectiveDate
         )
     }
@@ -199,7 +222,10 @@ actor BlockerService: BlockerServiceProtocol {
             repository.clearPendingSelection()
             // Commit in-memory state only after persistence succeeds.
             self.selection = pendingSelection
+            self.selectionSnapshot = pendingSelectionSnapshot
+                ?? Self.snapshotOrEmpty(from: pendingSelection, context: "pending selection application")
             self.pendingSelection = nil
+            self.pendingSelectionSnapshot = nil
             self.pendingSelectionEffectiveDate = nil
             return true
         } catch {
@@ -210,7 +236,20 @@ actor BlockerService: BlockerServiceProtocol {
     /// Clears any pending selection without applying it.
     func cancelPendingSelection() async {
         pendingSelection = nil
+        pendingSelectionSnapshot = nil
         pendingSelectionEffectiveDate = nil
         repository.clearPendingSelection()
+    }
+
+    private nonisolated static func snapshotOrEmpty(
+        from selection: FamilyActivitySelection,
+        context: String
+    ) -> AppSelectionSnapshot {
+        do {
+            return try AppSelectionSnapshot(selection: selection)
+        } catch {
+            logger.fault("Failed to encode selection snapshot during \(context, privacy: .public).")
+            return .empty
+        }
     }
 }

@@ -23,8 +23,12 @@ actor MockBlockerService: BlockerServiceProtocol {
     /// The stored app selection (simulates persistence).
     var selection: FamilyActivitySelection = FamilyActivitySelection()
 
+    /// Cached serialized snapshot for read APIs.
+    private var selectionSnapshot: AppSelectionSnapshot = .empty
+
     /// Pending selection and effective date for deferred edits.
     var pendingSelection: FamilyActivitySelection?
+    private var pendingSelectionSnapshot: AppSelectionSnapshot?
     var pendingSelectionEffectiveDate: Date?
     
     /// Returns the mock authorization status.
@@ -51,38 +55,40 @@ actor MockBlockerService: BlockerServiceProtocol {
     }
     
     /// Simulates storing the user's app selection.
-    /// - Parameter selection: The `FamilyActivitySelection` to store.
+    /// - Parameter selection: Serialized `FamilyActivitySelection` payload to store.
     /// - Throws: `BlockerServiceError.configurationUpdateFailed` if `shouldThrowError` is `true`.
-    func setSelection(_ selection: FamilyActivitySelection) async throws {
+    func setSelection(_ selection: AppSelectionSnapshot) async throws {
         if shouldThrowError {
             throw BlockerServiceError.configurationUpdateFailed
         }
-        self.selection = selection
+        self.selection = try selection.decodedSelection()
+        selectionSnapshot = selection
     }
     
     /// Returns the stored app selection.
-    /// - Returns: The current `FamilyActivitySelection`.
-    func getSelection() async -> FamilyActivitySelection {
-        return selection
+    /// - Returns: The current selection as a serialized snapshot.
+    func getSelection() async -> AppSelectionSnapshot {
+        selectionSnapshot
     }
 
-    func setPendingSelection(_ selection: FamilyActivitySelection, effectiveDate: Date) async throws {
+    func setPendingSelection(_ selection: AppSelectionSnapshot, effectiveDate: Date) async throws {
         if shouldThrowError {
             throw BlockerServiceError.configurationUpdateFailed
         }
 
-        pendingSelection = selection
+        pendingSelection = try selection.decodedSelection()
+        pendingSelectionSnapshot = selection
         pendingSelectionEffectiveDate = effectiveDate
     }
 
     func getPendingSelection() async -> PendingAppSelection? {
-        guard let pendingSelection,
+        guard let pendingSelectionSnapshot,
               let pendingSelectionEffectiveDate else {
             return nil
         }
 
         return PendingAppSelection(
-            selection: pendingSelection,
+            selection: pendingSelectionSnapshot,
             effectiveDate: pendingSelectionEffectiveDate
         )
     }
@@ -96,13 +102,16 @@ actor MockBlockerService: BlockerServiceProtocol {
         }
 
         selection = pendingSelection
+        selectionSnapshot = pendingSelectionSnapshot ?? Self.snapshotOrEmpty(from: pendingSelection)
         self.pendingSelection = nil
+        self.pendingSelectionSnapshot = nil
         self.pendingSelectionEffectiveDate = nil
         return true
     }
 
     func cancelPendingSelection() async {
         pendingSelection = nil
+        pendingSelectionSnapshot = nil
         pendingSelectionEffectiveDate = nil
     }
     
@@ -122,5 +131,16 @@ actor MockBlockerService: BlockerServiceProtocol {
     /// - Parameter isAuthorized: Whether Screen Time should report as authorized.
     func setMockIsAuthorized(_ isAuthorized: Bool) {
         mockIsAuthorized = isAuthorized
+    }
+
+    private nonisolated static func snapshotOrEmpty(
+        from selection: FamilyActivitySelection
+    ) -> AppSelectionSnapshot {
+        do {
+            return try AppSelectionSnapshot(selection: selection)
+        } catch {
+            assertionFailure("Failed to encode mock FamilyActivitySelection snapshot.")
+            return .empty
+        }
     }
 }

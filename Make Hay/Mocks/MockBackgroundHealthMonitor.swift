@@ -81,7 +81,7 @@ actor MockBackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
         return stubbedResult
     }
 
-    func handleBackgroundRefresh(task: BGAppRefreshTask) async {
+    func handleBackgroundRefresh(task: BackgroundRefreshTaskContext) async {
         handleBackgroundRefreshCalled = true
         handleBackgroundRefreshCallCount += 1
         task.setTaskCompleted(success: true)

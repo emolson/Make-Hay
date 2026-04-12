@@ -8,6 +8,28 @@
 import BackgroundTasks
 import Foundation
 
+/// Sendable wrapper around a `BGAppRefreshTask` provided by `BGTaskScheduler`.
+///
+/// `BackgroundTasks` does not currently annotate `BGAppRefreshTask` as `Sendable`,
+/// but Make Hay hands each task off to exactly one async refresh pipeline before
+/// calling `setTaskCompleted`. Wrapping the task keeps the cross-actor API explicit
+/// without exposing the raw Objective-C type to Swift 6's strict concurrency checks.
+struct BackgroundRefreshTaskContext: @unchecked Sendable {
+    nonisolated(unsafe) private let task: BGAppRefreshTask
+
+    nonisolated init(task: BGAppRefreshTask) {
+        self.task = task
+    }
+
+    nonisolated func setExpirationHandler(_ handler: @escaping @Sendable () -> Void) {
+        task.expirationHandler = handler
+    }
+
+    nonisolated func setTaskCompleted(success: Bool) {
+        task.setTaskCompleted(success: success)
+    }
+}
+
 /// Snapshot produced by a single evaluation cycle: health metrics, blocking decision,
 /// and timestamp.
 ///
@@ -116,8 +138,8 @@ protocol BackgroundHealthMonitorProtocol: Actor {
     /// Re-registers observer queries (guards against silent invalidation after HealthKit
     /// daemon restart), runs a full evaluation, and schedules the next refresh.
     ///
-    /// - Parameter task: The background task provided by the system.
-    func handleBackgroundRefresh(task: BGAppRefreshTask) async
+    /// - Parameter task: Sendable wrapper around the background task provided by the system.
+    func handleBackgroundRefresh(task: BackgroundRefreshTaskContext) async
 }
 
 extension BackgroundHealthMonitorProtocol {

@@ -10,6 +10,24 @@ import Foundation
 import HealthKit
 import os.log
 
+/// Sendable wrapper for HealthKit's observer completion callback.
+///
+/// HealthKit requires this closure to be invoked exactly once after observer
+/// processing completes, but the imported closure type is not annotated as
+/// `Sendable`. The callback is a one-shot system handoff and is safe to move
+/// into the unstructured task that performs the async evaluation pass.
+private struct ObserverDeliveryCompletion: @unchecked Sendable {
+    nonisolated(unsafe) private let completionHandler: () -> Void
+
+    nonisolated init(_ completionHandler: @escaping () -> Void) {
+        self.completionHandler = completionHandler
+    }
+
+    nonisolated func callAsFunction() {
+        completionHandler()
+    }
+}
+
 /// Actor that registers `HKObserverQuery` instances and enables `enableBackgroundDelivery`
 /// for all tracked health types so HealthKit can wake the app in the background when health
 /// data changes.
@@ -89,6 +107,12 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
             HKQuantityType.quantityType(forIdentifier: .appleExerciseTime)
         ].compactMap { $0 }
     }()
+
+    /// Lookup table used by async re-registration paths so unstructured tasks only
+    /// capture a stable, sendable type identifier instead of `HKSampleType` objects.
+    private static let observedTypesByIdentifier: [String: HKSampleType] = Dictionary(
+        uniqueKeysWithValues: observedTypes.map { ($0.identifier, $0) }
+    )
 
     // MARK: - Initialization
 
@@ -185,8 +209,8 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
     /// restart), this handler re-registers them and runs a fresh evaluation. It also
     /// schedules the next refresh so the chain continues indefinitely.
     ///
-    /// - Parameter task: The background task provided by the system.
-    func handleBackgroundRefresh(task: BGAppRefreshTask) async {
+    /// - Parameter task: Sendable wrapper around the background task provided by the system.
+    func handleBackgroundRefresh(task: BackgroundRefreshTaskContext) async {
         Self.logger.info("BGAppRefreshTask fired.")
 
         // Re-register observer queries idempotently. If the HealthKit daemon restarted
@@ -198,7 +222,7 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
         // even if evaluation fails or times out.
         scheduleBackgroundRefresh()
 
-        task.expirationHandler = {
+        task.setExpirationHandler {
             Self.logger.warning("BGAppRefreshTask expiring — evaluation may be incomplete.")
         }
 
@@ -267,8 +291,9 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
                 completionHandler()
 
                 guard let self else { return }
-                Task {
-                    await self.registerObserverQuery(for: sampleType)
+                Task { [weak self, typeIdentifier] in
+                    guard let self else { return }
+                    await self.reregisterObserverQuery(forTypeIdentifier: typeIdentifier)
                 }
                 return
             }
@@ -287,9 +312,14 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
             // follow-up evaluations run as a separate fire-and-forget Task that is NOT
             // blocking the completionHandler. This prevents late completionHandler calls
             // that trigger exponential backoff on future deliveries.
-            Task {
+            let observerCompletion = ObserverDeliveryCompletion(completionHandler)
+            Task { [weak self, observerCompletion] in
+                guard let self else {
+                    observerCompletion()
+                    return
+                }
                 await self.handleObserverDelivery()
-                completionHandler()
+                observerCompletion()
             }
         }
 
@@ -309,6 +339,15 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
             registerObserverQuery(for: sampleType)
         }
         Self.logger.info("Re-registered all observer queries.")
+    }
+
+    private func reregisterObserverQuery(forTypeIdentifier typeIdentifier: String) {
+        guard let sampleType = Self.observedTypesByIdentifier[typeIdentifier] else {
+            Self.logger.error("Observer query invalidated for an untracked type.")
+            return
+        }
+
+        registerObserverQuery(for: sampleType)
     }
 
     /// Enables background delivery for the given sample type.
@@ -433,6 +472,8 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
 
         // Bail early if no goals are configured — nothing to evaluate.
         let hasGoals = GoalBlockingEvaluator.hasEnabledGoals(goal: goal)
+        let evaluationGoal = goal
+        let enabledExerciseGoals = evaluationGoal.exerciseGoals.filter(\.isEnabled)
 
         do {
             guard hasGoals else {
@@ -455,13 +496,13 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
             // hung HealthKit query doesn't consume the entire ~30s wake window
             // without calling the observer completionHandler.
             let result = try await withThrowingTaskGroup(of: EvaluationResult.self) { group in
-                group.addTask { [healthService] in
+                group.addTask { [healthService, evaluationGoal, enabledExerciseGoals] in
                     // Fetch current health metrics.
                     let currentData = try await healthService.fetchCurrentData()
 
                     // Fetch exercise minutes for each enabled exercise goal.
                     var exerciseMinutesByGoalId: [UUID: Int] = [:]
-                    for exerciseGoal in goal.exerciseGoals where exerciseGoal.isEnabled {
+                    for exerciseGoal in enabledExerciseGoals {
                         try Task.checkCancellation()
                         let minutes = try await healthService.fetchExerciseMinutes(
                             for: exerciseGoal.exerciseType.hkWorkoutActivityType
@@ -481,7 +522,10 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
                         currentMinutesSinceMidnight: minutesSinceMidnight
                     )
 
-                    let shouldBlock = GoalBlockingEvaluator.shouldBlock(goal: goal, snapshot: snapshot)
+                    let shouldBlock = GoalBlockingEvaluator.shouldBlock(
+                        goal: evaluationGoal,
+                        snapshot: snapshot
+                    )
 
                     return EvaluationResult(
                         steps: currentData.steps,

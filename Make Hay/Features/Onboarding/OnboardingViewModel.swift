@@ -5,7 +5,7 @@
 //  Created by Ethan Olson on 12/31/25.
 //
 
-import FamilyControls
+@preconcurrency import FamilyControls
 import Foundation
 import os.log
 import SwiftUI
@@ -443,21 +443,22 @@ final class OnboardingViewModel {
     /// by the rest of the app, then applies shields. During onboarding the user has no
     /// existing selection to guard, so no deferral logic is needed.
     func appPickerDismissed() {
+        let selection = appDraftSelection
         Task {
-            await persistAppSelection()
+            await persistAppSelection(selection)
         }
     }
     
     /// Persists the draft app selection and synchronises shields.
-    private func persistAppSelection() async {
-        let selection = appDraftSelection
+    private func persistAppSelection(_ selection: FamilyActivitySelection) async {
         let hasApps = !selection.applicationTokens.isEmpty || !selection.categoryTokens.isEmpty
         
         isSavingAppSelection = true
         defer { isSavingAppSelection = false }
         
         do {
-            try await blockerService.setSelection(selection)
+            let selectionSnapshot = try AppSelectionSnapshot(selection: selection)
+            try await blockerService.setSelection(selectionSnapshot)
         } catch {
             let _ = error
             Self.logger.warning("Onboarding app selection save failed.")

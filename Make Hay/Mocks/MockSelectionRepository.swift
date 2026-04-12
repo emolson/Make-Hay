@@ -12,10 +12,10 @@ import Foundation
 ///
 /// All state is held in memory — no disk I/O, no App Group, no entitlements required.
 struct MockSelectionRepository: SelectionRepositoryProtocol, Sendable {
-    func loadSelection() -> FamilyActivitySelection { FamilyActivitySelection() }
-    func saveSelection(_ selection: FamilyActivitySelection) throws {}
-    func loadPendingSelection() -> FamilyActivitySelection? { nil }
-    func loadPendingSelectionDate() -> Date? { nil }
-    func savePendingSelection(_ selection: FamilyActivitySelection, effectiveDate: Date) throws {}
-    func clearPendingSelection() {}
+    nonisolated func loadSelection() -> FamilyActivitySelection { FamilyActivitySelection() }
+    nonisolated func saveSelection(_ selection: FamilyActivitySelection) throws {}
+    nonisolated func loadPendingSelection() -> FamilyActivitySelection? { nil }
+    nonisolated func loadPendingSelectionDate() -> Date? { nil }
+    nonisolated func savePendingSelection(_ selection: FamilyActivitySelection, effectiveDate: Date) throws {}
+    nonisolated func clearPendingSelection() {}
 }
