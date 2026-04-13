@@ -69,6 +69,7 @@ struct SettingsView: View {
                 refreshSyncSection
                 permissionsSection
                 blockedAppsSection
+                aboutSection
                 #if DEBUG
                 debugSection
                 #endif
@@ -102,14 +103,12 @@ struct SettingsView: View {
                 String(localized: "Enable Health Access"),
                 isPresented: $showingHealthGuidance
             ) {
-                Button(String(localized: "Open Health App")) {
-                    if let url = URL(string: "x-apple-health://") {
-                        openURL(url)
-                    }
+                Button(String(localized: "Open Settings")) {
+                    openAppSettings()
                 }
                 Button(String(localized: "Cancel"), role: .cancel) { }
             } message: {
-                Text(String(localized: "The Health permission prompt can only be shown once. To grant access, open the Health app -> tap your profile (top right) -> Apps & Services -> Make Hay -> turn on all categories."))
+                Text(String(localized: "The Health permission prompt can only be shown once. To grant access, open the Health app, tap your profile (top right), then Apps & Services → Make Hay → turn on all categories."))
             }
         }
     }
@@ -256,6 +255,40 @@ struct SettingsView: View {
             Text(String(localized: "Blocked Apps"))
         } footer: {
             Text(String(localized: "Select the apps that will be blocked until you reach your enabled goals."))
+        }
+    }
+
+    private static let privacyPolicyURL = URL(string: "https://github.com/emolson/Make-Hay/blob/main/PRIVACY.md")!
+    private static let supportURL = URL(string: "https://github.com/emolson/Make-Hay/blob/main/SUPPORT.md")!
+
+    @ViewBuilder
+    private var aboutSection: some View {
+        Section {
+            Link(destination: Self.privacyPolicyURL) {
+                HStack {
+                    Image(systemName: "hand.raised")
+                    Text(String(localized: "Privacy Policy"))
+                    Spacer()
+                    Image(systemName: "arrow.up.right")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .accessibilityIdentifier("privacyPolicyLink")
+
+            Link(destination: Self.supportURL) {
+                HStack {
+                    Image(systemName: "questionmark.circle")
+                    Text(String(localized: "Support"))
+                    Spacer()
+                    Image(systemName: "arrow.up.right")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .accessibilityIdentifier("supportLink")
+        } header: {
+            Text(String(localized: "About"))
         }
     }
     

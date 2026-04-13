@@ -109,8 +109,7 @@ struct OnboardingView: View {
     }
 
     private func openHealthApp() {
-        guard let healthURL = URL(string: "x-apple-health://") else { return }
-        openURL(healthURL)
+        openAppSettings()
     }
 }
 
@@ -289,7 +288,7 @@ private struct HealthPermissionStepView: View {
         case .authorized:
             return String(localized: "Continue")
         case .unconfirmed, .denied:
-            return String(localized: "Open Health App")
+            return String(localized: "Open Settings")
         case .notDetermined:
             return String(localized: "Connect Apple Health")
         }
@@ -334,7 +333,7 @@ private struct ScreenTimePermissionStepView: View {
                 .fontWeight(.bold)
                 .multilineTextAlignment(.center)
             
-            Text(String(localized: "Screen Time access lets Make Hay use the Screen Time API to restrict access to the apps you choose until you hit your goal. You can easily revoke this access at any time in Settings."))
+            Text(String(localized: "Make Hay uses Screen Time to temporarily limit access to apps you choose until you reach your daily fitness goal. You stay in control and can revoke this permission at any time in Settings."))
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
