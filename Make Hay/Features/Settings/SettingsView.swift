@@ -258,8 +258,8 @@ struct SettingsView: View {
         }
     }
 
-    private static let privacyPolicyURL = URL(string: "https://github.com/emolson/Make-Hay/blob/main/PRIVACY.md")!
-    private static let supportURL = URL(string: "https://github.com/emolson/Make-Hay/blob/main/SUPPORT.md")!
+    private static let privacyPolicyURL = URL(string: "https://emolson.github.io/Make-Hay/privacy/")!
+    private static let supportURL = URL(string: "https://emolson.github.io/Make-Hay/support/")!
 
     @ViewBuilder
     private var aboutSection: some View {
