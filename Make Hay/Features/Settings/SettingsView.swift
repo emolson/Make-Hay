@@ -10,7 +10,7 @@ import SwiftUI
 /// The settings view where users can configure app permissions and blocked apps.
 /// Goals are managed in the Dashboard for a unified experience.
 struct SettingsView: View {
-
+    
     private static let traceCategory = "SettingsView"
     
     // MARK: - Dependencies
@@ -20,46 +20,46 @@ struct SettingsView: View {
     /// between this view and `DashboardViewModel`. Mock-backed default keeps previews
     /// zero-config.
     @Environment(\.permissionManager) private var permissionManager
-
+    
     /// SwiftUI environment action for opening the app's Settings page.
     @Environment(\.openURL) private var openURL
-
+    
     /// The blocker service for app selection and debug shield toggling.
     @Environment(\.blockerService) private var blockerService
-
+    
     /// The background health monitor for triggering a manual sync.
     @Environment(\.backgroundHealthMonitor) private var backgroundHealthMonitor
     
     // MARK: - State
     
-    #if DEBUG
+#if DEBUG
     /// Debug state for manually forcing app blocking on/off.
     /// Persisted to survive app restarts during testing sessions.
     @AppStorage("debugForceBlocking") private var isForceBlocking: Bool = false
-    #endif
+#endif
     
     /// Tracks any error message to display in an alert.
     @State private var errorMessage: String?
-
+    
     /// Tracks whether the error alert is shown.
     @State private var showingErrorAlert: Bool = false
-
+    
     /// Tracks whether the Health manual guidance alert is shown.
     /// **Why a separate alert?** When HealthKit's system prompt has already been presented
     /// once, calling `requestAuthorization()` may silently do nothing. This alert tells
     /// the user how to fix it manually in the Health app without falsely labeling the
     /// state as denied when readable samples are merely absent.
     @State private var showingHealthGuidance: Bool = false
-
+    
     /// Whether a manual health sync is currently in-flight.
     @State private var isSyncing: Bool = false
     
-    #if DEBUG
+#if DEBUG
     /// Reference to the current shield update task for cancellation handling.
     /// **Why store this?** Prevents race conditions when the toggle changes rapidly
     /// by cancelling any in-flight request before starting a new one.
     @State private var shieldUpdateTask: Task<Void, Never>?
-    #endif
+#endif
     
     // MARK: - Body
     
@@ -70,9 +70,9 @@ struct SettingsView: View {
                 permissionsSection
                 blockedAppsSection
                 aboutSection
-                #if DEBUG
+#if DEBUG
                 debugSection
-                #endif
+#endif
             }
             .navigationTitle(String(localized: "Settings"))
             .task {
@@ -114,7 +114,7 @@ struct SettingsView: View {
     }
     
     // MARK: - Sections
-
+    
     /// Manual sync section — gives users an explicit way to fetch the latest HealthKit
     /// data and re-evaluate shields immediately, bypassing the OS-throttled background
     /// delivery cadence.
@@ -148,11 +148,9 @@ struct SettingsView: View {
             .accessibilityLabel(String(localized: "Refresh Sync"))
         } header: {
             Text(String(localized: "Health Sync"))
-        } footer: {
-            Text(String(localized: "iOS may delay background health updates. If you've just finished a workout, tap Refresh Sync to update immediately."))
         }
     }
-
+    
     /// Permissions section showing current authorization status for Health and Screen Time.
     ///
     /// **Why this section?** Users need visibility into permission states to understand
@@ -231,7 +229,7 @@ struct SettingsView: View {
                 }
                 .accessibilityIdentifier("openSettingsButton")
             }
-
+            
             if shouldShowReviewHealthPermissionsButton {
                 Button(action: reviewHealthPermissions) {
                     HStack {
@@ -243,8 +241,6 @@ struct SettingsView: View {
             }
         } header: {
             Text(String(localized: "Permissions"))
-        } footer: {
-            Text(String(localized: "Screen Time is required to block apps. Apple Health lets Make Hay track your health goals. Pull to refresh status."))
         }
     }
     
@@ -253,14 +249,12 @@ struct SettingsView: View {
             AppPickerView()
         } header: {
             Text(String(localized: "Blocked Apps"))
-        } footer: {
-            Text(String(localized: "Select the apps that will be blocked until you reach your enabled goals."))
         }
     }
-
+    
     private static let privacyPolicyURL = URL(string: "https://emolson.github.io/Make-Hay/privacy/")!
     private static let supportURL = URL(string: "https://emolson.github.io/Make-Hay/support/")!
-
+    
     @ViewBuilder
     private var aboutSection: some View {
         Section {
@@ -275,7 +269,7 @@ struct SettingsView: View {
                 }
             }
             .accessibilityIdentifier("privacyPolicyLink")
-
+            
             Link(destination: Self.supportURL) {
                 HStack {
                     Image(systemName: "questionmark.circle")
@@ -301,7 +295,7 @@ struct SettingsView: View {
     /// **Why `#if DEBUG`?** In production, this toggle could accidentally lock the user
     /// out of all their apps with no way to undo it. Restricting to debug builds ensures
     /// it's only available during development.
-    #if DEBUG
+#if DEBUG
     @ViewBuilder
     private var debugSection: some View {
         Section {
@@ -351,7 +345,7 @@ struct SettingsView: View {
                 .foregroundStyle(.orange)
         }
     }
-    #endif
+#endif
     
     // MARK: - Health Permission Display
     
@@ -406,23 +400,23 @@ struct SettingsView: View {
     
     private var screenTimeStatusText: String {
         permissionManager.screenTimeAuthorized
-            ? String(localized: "Family Controls authorized")
-            : String(localized: "Not authorized - app blocking unavailable")
+        ? String(localized: "Family Controls authorized")
+        : String(localized: "Not authorized - app blocking unavailable")
     }
-
+    
     private var shouldShowOpenAppSettingsButton: Bool {
         !permissionManager.screenTimeAuthorized
     }
-
+    
     private var shouldShowReviewHealthPermissionsButton: Bool {
         !permissionManager.healthAuthorizationStatus.isAuthorized
     }
-
+    
     private func openAppSettings() {
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         openURL(url)
     }
-
+    
     /// Attempts to show the HealthKit permission prompt. If the prompt has already been
     /// shown without proven authorization, shows manual guidance instead, since HealthKit
     /// only presents its sheet once per type set.
@@ -432,15 +426,15 @@ struct SettingsView: View {
                 category: Self.traceCategory,
                 message: "Health access request initiated from Settings."
             )
-
+            
             await permissionManager.refresh(reason: "settings.requestHealthAccess.preflight")
-
+            
             guard permissionManager.healthAuthorizationStatus == .notDetermined,
                   !permissionManager.healthAuthorizationPromptShown else {
                 showingHealthGuidance = true
                 return
             }
-
+            
             do {
                 let status = try await permissionManager.requestHealthPermission()
                 if status == .unconfirmed {
@@ -452,11 +446,11 @@ struct SettingsView: View {
             }
         }
     }
-
+    
     private func reviewHealthPermissions() {
         showingHealthGuidance = true
     }
-
+    
     /// Triggers an immediate foreground sync: fetches the latest HealthKit data,
     /// re-evaluates goals, and updates shields. Also refreshes permission state
     /// afterward so the Permissions section reflects any changes.
@@ -464,12 +458,12 @@ struct SettingsView: View {
         Task {
             isSyncing = true
             defer { isSyncing = false }
-
+            
             AppLogger.trace(
                 category: Self.traceCategory,
                 message: "Settings manual sync button tapped."
             )
-
+            
             do {
                 _ = try await backgroundHealthMonitor.syncNow(reason: "settings.manualRefreshButton")
                 AppLogger.trace(
@@ -489,7 +483,7 @@ struct SettingsView: View {
                 errorMessage = error.localizedDescription
                 showingErrorAlert = true
             }
-
+            
             // Always refresh permission state after a sync attempt so the
             // Permissions section shows current status regardless of sync outcome.
             await permissionManager.refresh(reason: "settings.manualRefreshButton.postSync")
