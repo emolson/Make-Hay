@@ -23,8 +23,6 @@ struct SelectionRepository: SelectionRepositoryProtocol, Sendable {
     // MARK: - Configuration
 
     private let selectionURL: URL
-    private let pendingSelectionURL: URL
-    private let pendingSelectionDateURL: URL
 
     /// File protection level applied after every write.
     ///
@@ -44,19 +42,12 @@ struct SelectionRepository: SelectionRepositoryProtocol, Sendable {
     nonisolated init() {
         let base = SharedStorage.appGroupContainerURL ?? Self.fallbackDocumentsURL()
         self.selectionURL = base.appendingPathComponent("FamilyActivitySelection.plist")
-        self.pendingSelectionURL = base.appendingPathComponent("PendingFamilyActivitySelection.plist")
-        self.pendingSelectionDateURL = base.appendingPathComponent("PendingFamilyActivitySelectionDate.plist")
+        Self.removeLegacyPendingArtifacts(in: base)
     }
 
     /// Testable initializer accepting explicit URLs.
-    nonisolated init(
-        selectionURL: URL,
-        pendingSelectionURL: URL,
-        pendingSelectionDateURL: URL
-    ) {
+    nonisolated init(selectionURL: URL) {
         self.selectionURL = selectionURL
-        self.pendingSelectionURL = pendingSelectionURL
-        self.pendingSelectionDateURL = pendingSelectionDateURL
     }
 
     // MARK: - SelectionRepositoryProtocol
@@ -67,26 +58,6 @@ struct SelectionRepository: SelectionRepositoryProtocol, Sendable {
 
     nonisolated func saveSelection(_ selection: FamilyActivitySelection) throws {
         try writeProtected(selection, to: selectionURL)
-    }
-
-    nonisolated func loadPendingSelection() -> FamilyActivitySelection? {
-        load(FamilyActivitySelection.self, from: pendingSelectionURL)
-    }
-
-    nonisolated func loadPendingSelectionDate() -> Date? {
-        load(Date.self, from: pendingSelectionDateURL)
-    }
-
-    nonisolated func savePendingSelection(_ selection: FamilyActivitySelection, effectiveDate: Date) throws {
-        try writeProtected(selection, to: pendingSelectionURL)
-        try writeProtected(effectiveDate, to: pendingSelectionDateURL)
-    }
-
-    nonisolated func clearPendingSelection() {
-        let fm = FileManager.default
-        for url in [pendingSelectionURL, pendingSelectionDateURL] where fm.fileExists(atPath: url.path) {
-            try? fm.removeItem(at: url)
-        }
     }
 
     // MARK: - Private Helpers
@@ -128,6 +99,23 @@ struct SelectionRepository: SelectionRepositoryProtocol, Sendable {
         let quarantineURL = url.appendingPathExtension("corrupt")
         try? FileManager.default.removeItem(at: quarantineURL)
         try? FileManager.default.moveItem(at: url, to: quarantineURL)
+    }
+
+    /// Removes orphaned pending-selection files left by the old next-day deferral system.
+    ///
+    /// **Why here?** The deferred blocked-app scheduling was removed; these artifacts
+    /// would otherwise linger in the App Group container indefinitely.
+    private nonisolated static func removeLegacyPendingArtifacts(in base: URL) {
+        let fileManager = FileManager.default
+        for fileName in [
+            "PendingFamilyActivitySelection.plist",
+            "PendingFamilyActivitySelectionDate.plist"
+        ] {
+            let url = base.appendingPathComponent(fileName)
+            if fileManager.fileExists(atPath: url.path) {
+                try? fileManager.removeItem(at: url)
+            }
+        }
     }
 
     private nonisolated static func fallbackDocumentsURL() -> URL {

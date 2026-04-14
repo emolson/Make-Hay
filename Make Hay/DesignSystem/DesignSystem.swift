@@ -53,15 +53,3 @@ extension Font {
     static var dashboardErrorIcon: Font { .system(size: 50, weight: .regular, design: .default) }
 }
 
-// MARK: - Date Helpers
-
-extension Date {
-    /// Returns local midnight for tomorrow using the current calendar.
-    ///
-    /// **Why centralize this?** Goal and blocked-app pending flows must use identical
-    /// scheduling semantics to avoid user-visible mismatches.
-    static func localMidnightTomorrow(from date: Date = Date(), calendar: Calendar = .current) -> Date {
-        let tomorrow = calendar.date(byAdding: .day, value: 1, to: date) ?? date
-        return calendar.startOfDay(for: tomorrow)
-    }
-}

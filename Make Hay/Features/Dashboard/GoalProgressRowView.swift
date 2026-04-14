@@ -36,24 +36,15 @@ struct GoalProgressRowView: View {
 
     // MARK: - Subviews
 
-    /// Icon, title, exercise sub-label, schedule label, pending indicator, current/target text, and chevron.
+    /// Icon, title, exercise sub-label, schedule label, current/target text, and chevron.
     private var headerRow: some View {
         HStack(spacing: 8) {
             goalIcon
 
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    Text(progress.type.displayName)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.primary)
-
-                    if progress.hasPendingChange {
-                        Image(systemName: "calendar.badge.clock")
-                            .font(.caption2)
-                            .foregroundStyle(Color.statusInfo)
-                            .accessibilityLabel(String(localized: "Pending change scheduled"))
-                    }
-                }
+                Text(progress.type.displayName)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
 
                 if let exerciseType = progress.exerciseType, exerciseType != .any {
                     Text(exerciseType.displayName)
@@ -186,8 +177,7 @@ struct GoalProgressRowView: View {
             isMet: false,
             exerciseGoalId: nil,
             exerciseType: nil,
-            schedule: .everyDay,
-            hasPendingChange: false
+            schedule: .everyDay
         ),
         onTap: {}
     )
@@ -204,8 +194,7 @@ struct GoalProgressRowView: View {
             isMet: true,
             exerciseGoalId: nil,
             exerciseType: nil,
-            schedule: .everyDay,
-            hasPendingChange: false
+            schedule: .everyDay
         ),
         onTap: {}
     )
@@ -222,26 +211,7 @@ struct GoalProgressRowView: View {
             isMet: false,
             exerciseGoalId: nil,
             exerciseType: nil,
-            schedule: .weekdays,
-            hasPendingChange: false
-        ),
-        onTap: {}
-    )
-    .padding()
-}
-
-#Preview("Pending Change Indicator") {
-    GoalProgressRowView(
-        progress: GoalProgress(
-            type: .activeEnergy,
-            current: 200,
-            target: 500,
-            progress: 0.4,
-            isMet: false,
-            exerciseGoalId: nil,
-            exerciseType: nil,
-            schedule: .weekdays,
-            hasPendingChange: true
+            schedule: .weekdays
         ),
         onTap: {}
     )
@@ -258,8 +228,7 @@ struct GoalProgressRowView: View {
             isMet: false,
             exerciseGoalId: UUID(),
             exerciseType: .running,
-            schedule: .weekends,
-            hasPendingChange: false
+            schedule: .weekends
         ),
         isInactive: true,
         onTap: {}

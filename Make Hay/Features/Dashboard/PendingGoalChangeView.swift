@@ -9,62 +9,24 @@ import SwiftUI
 
 /// Context describing which guarded change flow is being confirmed.
 enum PendingChangeContext {
-    /// A goal is being made easier — change deferred to tomorrow.
     case goalChange
     case blockedAppsChange
 
     var navigationTitle: String {
         switch self {
         case .goalChange:
-            return String(localized: "Change Scheduled for Tomorrow")
+            return String(localized: "Pause Before Unlocking")
         case .blockedAppsChange:
-            return String(localized: "Update Blocked Apps?")
+            return String(localized: "Pause Before Editing")
         }
     }
 
     var headline: String {
-        switch self {
-        case .goalChange:
-            return String(localized: "Change Scheduled for Tomorrow")
-        case .blockedAppsChange:
-            return String(localized: "Keep Your Guardrails Intact")
-        }
+        String(localized: "Take a Deep Breath")
     }
 
     var message: String {
-        switch self {
-        case .goalChange:
-            return String(localized: "To maintain your current progress and blocker status, this change will take effect tomorrow morning. Do you want to save it?")
-        case .blockedAppsChange:
-            return String(localized: "Your goals are not met yet. To preserve your commitment, blocked-app changes will take effect tomorrow morning.")
-        }
-    }
-
-    var bulletPoints: [String] {
-        switch self {
-        case .goalChange:
-            return [
-                String(localized: "Today's target remains unchanged"),
-                String(localized: "New target starts tomorrow at midnight"),
-                String(localized: "Your progress streak continues")
-            ]
-        case .blockedAppsChange:
-            return [
-                String(localized: "Today's blocking stays in place"),
-                String(localized: "New app selection starts tomorrow at midnight"),
-                String(localized: "Your goal guardrails stay consistent")
-            ]
-        }
-    }
-
-    /// Button label for the primary (schedule) action.
-    var scheduleButtonLabel: String {
-        switch self {
-        case .goalChange:
-            return String(localized: "Save for Tomorrow")
-        case .blockedAppsChange:
-            return String(localized: "Save for Tomorrow")
-        }
+        String(localized: "Breathe in through your nose and out through your mouth. Think about if unblocking is a need or a want.")
     }
 
     var emergencyWarningDescription: String {
@@ -77,13 +39,15 @@ enum PendingChangeContext {
     }
 }
 
-/// Modal view presented when a user attempts to lower their goal while apps are blocked.
-/// Implements the "Next-Day Effect" by offering to schedule the change for tomorrow,
-/// removing the immediate gratification of cheating.
-///
-/// **Why this works:** If lowering the goal doesn't unlock apps now, there's no incentive
-/// to cheat in a moment of weakness. The user can still adjust goals, but only for tomorrow.
+/// Modal view presented when a user attempts to weaken their guardrails while blocked.
+/// It creates a short pause before the emergency unlock path becomes available.
 struct PendingGoalChangeView: View {
+
+    private static let breathPhaseDuration: TimeInterval = 4
+    private static let breathRounds: Int = 2
+    private static let totalDuration: TimeInterval = breathPhaseDuration * Double(breathRounds * 2)
+    private static let minimumBreathScale: CGFloat = 0.82
+    private static let maximumBreathScale: CGFloat = 1.2
     
     // MARK: - Environment
     
@@ -94,12 +58,15 @@ struct PendingGoalChangeView: View {
     /// Tracks whether to show the emergency unlock flow.
     @State private var showingEmergencyUnlock: Bool = false
 
+    /// Start time for the guided breathing cycle.
+    @State private var breathingStartDate: Date?
+
+    /// Whether the breathing cycle has finished and the emergency path is available.
+    @State private var emergencyUnlockAvailable: Bool = false
+
     /// The guarded flow context that controls copy/content.
     let context: PendingChangeContext
-    
-    /// Callback invoked when the user chooses to schedule the change for tomorrow.
-    let onSchedule: () -> Void
-    
+
     /// Callback invoked when the user confirms an emergency unlock.
     let onEmergencyUnlock: () -> Void
     
@@ -111,6 +78,8 @@ struct PendingGoalChangeView: View {
                 Spacer()
                 
                 headerIcon
+
+                countdownRing
                 
                 messageContent
                 
@@ -136,16 +105,54 @@ struct PendingGoalChangeView: View {
                     onEmergencyUnlock()
                 }
             }
+            .task {
+                guard breathingStartDate == nil else { return }
+                breathingStartDate = Date()
+
+                try? await Task.sleep(for: .seconds(16))
+                guard !Task.isCancelled else { return }
+                emergencyUnlockAvailable = true
+            }
         }
     }
     
     // MARK: - View Components
     
     private var headerIcon: some View {
-        Image(systemName: "calendar.badge.clock")
+        Image(systemName: "wind")
             .font(.system(size: 60))
             .foregroundStyle(Color.statusInfo)
             .accessibilityIdentifier("pendingChangeIcon")
+    }
+
+    private var countdownRing: some View {
+        TimelineView(.periodic(from: .now, by: 1.0 / 30.0)) { context in
+            let metrics = breathingMetrics(at: timelineDate(for: context.date))
+
+            ZStack {
+                Circle()
+                    .stroke(Color.statusInfo.opacity(0.15), lineWidth: 14)
+
+                Circle()
+                    .trim(from: 0, to: metrics.progress)
+                    .stroke(
+                        Color.statusInfo,
+                        style: StrokeStyle(lineWidth: 14, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+
+                Text(metrics.instruction)
+                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .textCase(.uppercase)
+                    .scaleEffect(metrics.textScale)
+                    .frame(width: 180, height: 80)
+            }
+            .frame(width: 240, height: 240)
+            .accessibilityIdentifier("breathingCountdown")
+            .accessibilityLabel(String(localized: "Breathing countdown"))
+            .accessibilityValue(metrics.accessibilityValue)
+        }
     }
     
     private var messageContent: some View {
@@ -159,55 +166,93 @@ struct PendingGoalChangeView: View {
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(context.bulletPoints, id: \.self) { bullet in
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(Color.statusSuccess)
-                        Text(bullet)
-                            .font(.subheadline)
-                    }
-                }
-            }
-            .padding()
-            .background(Color.statusInfo.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal)
         }
         .accessibilityIdentifier("pendingChangeMessage")
     }
     
     private var actionButtons: some View {
         VStack(spacing: 12) {
-            Button {
-                onSchedule()
-                dismiss()
-            } label: {
-                Text(context.scheduleButtonLabel)
-                    .font(.headline)
+            if emergencyUnlockAvailable {
+                Button {
+                    showingEmergencyUnlock = true
+                } label: {
+                    Text(String(localized: "I Need To Unlock Now"))
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color.statusWarning)
+                .controlSize(.large)
+                .accessibilityIdentifier("emergencyUnlockButton")
+            } else {
+                Text(String(localized: "Emergency unlock becomes available when the breathing cycle ends."))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
+                    .padding(.vertical, 18)
+                    .background(Color.surfaceCard, in: RoundedRectangle(cornerRadius: 14))
+                    .accessibilityIdentifier("emergencyUnlockCountdownHint")
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .accessibilityIdentifier("scheduleForTomorrowButton")
-            
-            Button {
-                showingEmergencyUnlock = true
-            } label: {
-                Text(String(localized: "I need to unlock now (Emergency)"))
-                    .font(.subheadline)
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .tint(.orange)
-            .accessibilityIdentifier("emergencyUnlockButton")
         }
     }
+
+    private func timelineDate(for currentDate: Date) -> Date {
+        guard emergencyUnlockAvailable,
+              let breathingStartDate else {
+            return currentDate
+        }
+
+        return breathingStartDate.addingTimeInterval(Self.totalDuration)
+    }
+
+    private func breathingMetrics(at date: Date) -> BreathingMetrics {
+        guard let breathingStartDate else {
+            return BreathingMetrics(
+                progress: 0,
+                instruction: String(localized: "Inhale"),
+                textScale: Self.minimumBreathScale,
+                accessibilityValue: String(localized: "Inhale, breath 1 of 2")
+            )
+        }
+
+        let elapsed = min(max(0, date.timeIntervalSince(breathingStartDate)), Self.totalDuration)
+        let totalProgress = CGFloat(elapsed / Self.totalDuration)
+        let clampedElapsed = min(elapsed, Self.totalDuration - 0.0001)
+        let phaseIndex = min(
+            Int(clampedElapsed / Self.breathPhaseDuration),
+            (Self.breathRounds * 2) - 1
+        )
+        let phaseElapsed = elapsed - (Double(phaseIndex) * Self.breathPhaseDuration)
+        let phaseProgress = min(max(phaseElapsed / Self.breathPhaseDuration, 0), 1)
+        let isInhalePhase = phaseIndex.isMultiple(of: 2)
+        let instruction = String(localized: isInhalePhase ? "Inhale" : "Exhale")
+        let scaleRange = Self.maximumBreathScale - Self.minimumBreathScale
+        let textScale = isInhalePhase
+            ? Self.minimumBreathScale + (scaleRange * phaseProgress)
+            : Self.maximumBreathScale - (scaleRange * phaseProgress)
+        let breathNumber = min((phaseIndex / 2) + 1, Self.breathRounds)
+
+        return BreathingMetrics(
+            progress: totalProgress,
+            instruction: instruction,
+            textScale: textScale,
+            accessibilityValue: "\(instruction), breath \(breathNumber) of \(Self.breathRounds)"
+        )
+    }
+}
+
+private struct BreathingMetrics {
+    let progress: CGFloat
+    let instruction: String
+    let textScale: CGFloat
+    let accessibilityValue: String
 }
 
 // MARK: - Preview
 
 #Preview {
     PendingGoalChangeView(context: .goalChange) {
-    } onEmergencyUnlock: {
     }
 }

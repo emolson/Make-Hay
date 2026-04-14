@@ -191,108 +191,19 @@ struct HealthGoal: Codable, Sendable, Equatable {
     var timeBlockGoal: TimeBlockGoal = .init()
     /// Strategy for determining when goals unlock apps.
     var blockingStrategy: BlockingStrategy = .all
-    
-    // MARK: - Pending Changes (Per-Goal)
-    
-    /// Pending step goal change scheduled to take effect at `pendingGoalEffectiveDate`.
-    /// `nil` means no pending change for this goal type.
-    var pendingStepGoal: StepGoal?
-    /// Pending active energy goal change.
-    var pendingActiveEnergyGoal: ActiveEnergyGoal?
-    /// Pending exercise goal changes, matched by ID.
-    /// Only exercise goals that were actually edited appear here.
-    var pendingExerciseGoals: [ExerciseGoal] = []
-    /// IDs of exercise goals scheduled for deletion at `pendingGoalEffectiveDate`.
-    /// **Why separate from `pendingExerciseGoals`?** Edits store a full `ExerciseGoal`
-    /// to replace by ID, but deletions have no replacement object. A dedicated set
-    /// avoids conflating "disabled" with "deleted" and keeps intent explicit.
-    var pendingExerciseGoalDeletions: Set<UUID> = []
-    /// Pending time-block goal change.
-    var pendingTimeBlockGoal: TimeBlockGoal?
-    
-    /// The date when pending changes should take effect (midnight of next day).
-    /// **Why Date?** Allows precise comparison to determine when to apply changes.
-    var pendingGoalEffectiveDate: Date?
-    
-    /// Whether any per-goal pending changes exist.
-    nonisolated var hasPendingChanges: Bool {
-        pendingStepGoal != nil
-            || pendingActiveEnergyGoal != nil
-            || !pendingExerciseGoals.isEmpty
-            || !pendingExerciseGoalDeletions.isEmpty
-            || pendingTimeBlockGoal != nil
-    }
 
     nonisolated init(
         stepGoal: StepGoal = .init(),
         activeEnergyGoal: ActiveEnergyGoal = .init(),
         exerciseGoals: [ExerciseGoal] = [],
         timeBlockGoal: TimeBlockGoal = .init(),
-        blockingStrategy: BlockingStrategy = .all,
-        pendingStepGoal: StepGoal? = nil,
-        pendingActiveEnergyGoal: ActiveEnergyGoal? = nil,
-        pendingExerciseGoals: [ExerciseGoal] = [],
-        pendingExerciseGoalDeletions: Set<UUID> = [],
-        pendingTimeBlockGoal: TimeBlockGoal? = nil,
-        pendingGoalEffectiveDate: Date? = nil
+        blockingStrategy: BlockingStrategy = .all
     ) {
         self.stepGoal = stepGoal
         self.activeEnergyGoal = activeEnergyGoal
         self.exerciseGoals = exerciseGoals
         self.timeBlockGoal = timeBlockGoal
         self.blockingStrategy = blockingStrategy
-        self.pendingStepGoal = pendingStepGoal
-        self.pendingActiveEnergyGoal = pendingActiveEnergyGoal
-        self.pendingExerciseGoals = pendingExerciseGoals
-        self.pendingExerciseGoalDeletions = pendingExerciseGoalDeletions
-        self.pendingTimeBlockGoal = pendingTimeBlockGoal
-        self.pendingGoalEffectiveDate = pendingGoalEffectiveDate
-    }
-    
-    /// Applies pending goal changes if the effective date has passed.
-    /// Each per-goal pending field is applied independently and then cleared.
-    /// - Returns: True if any pending changes were applied.
-    @discardableResult
-        nonisolated mutating func applyPendingIfReady() -> Bool {
-        guard hasPendingChanges,
-              let effectiveDate = pendingGoalEffectiveDate,
-              Date() >= effectiveDate else {
-            return false
-        }
-        
-        if let pending = pendingStepGoal {
-            self.stepGoal = pending
-        }
-        if let pending = pendingActiveEnergyGoal {
-            self.activeEnergyGoal = pending
-        }
-        for pendingExercise in pendingExerciseGoals {
-            if let index = exerciseGoals.firstIndex(where: { $0.id == pendingExercise.id }) {
-                exerciseGoals[index] = pendingExercise
-            }
-        }
-        // Apply deferred exercise-goal deletions
-        if !pendingExerciseGoalDeletions.isEmpty {
-            exerciseGoals.removeAll { pendingExerciseGoalDeletions.contains($0.id) }
-        }
-        if let pending = pendingTimeBlockGoal {
-            self.timeBlockGoal = pending
-        }
-        
-        // Clear all pending state
-        clearPendingChanges()
-        
-        return true
-    }
-    
-    /// Clears all per-goal pending changes and the effective date.
-    nonisolated mutating func clearPendingChanges() {
-        pendingStepGoal = nil
-        pendingActiveEnergyGoal = nil
-        pendingExerciseGoals = []
-        pendingExerciseGoalDeletions = []
-        pendingTimeBlockGoal = nil
-        pendingGoalEffectiveDate = nil
     }
 
     /// Disables any enabled goal whose `.todayOnly` schedule has expired.
@@ -341,12 +252,6 @@ struct HealthGoal: Codable, Sendable, Equatable {
         case exerciseGoals
         case timeBlockGoal
         case blockingStrategy
-        case pendingStepGoal
-        case pendingActiveEnergyGoal
-        case pendingExerciseGoals
-        case pendingExerciseGoalDeletions
-        case pendingTimeBlockGoal
-        case pendingGoalEffectiveDate
     }
 
     nonisolated init(from decoder: Decoder) throws {
@@ -357,13 +262,7 @@ struct HealthGoal: Codable, Sendable, Equatable {
             activeEnergyGoal: try container.decodeIfPresent(ActiveEnergyGoal.self, forKey: .activeEnergyGoal) ?? .init(),
             exerciseGoals: try container.decodeIfPresent([ExerciseGoal].self, forKey: .exerciseGoals) ?? [],
             timeBlockGoal: try container.decodeIfPresent(TimeBlockGoal.self, forKey: .timeBlockGoal) ?? .init(),
-            blockingStrategy: try container.decodeIfPresent(BlockingStrategy.self, forKey: .blockingStrategy) ?? .all,
-            pendingStepGoal: try container.decodeIfPresent(StepGoal.self, forKey: .pendingStepGoal),
-            pendingActiveEnergyGoal: try container.decodeIfPresent(ActiveEnergyGoal.self, forKey: .pendingActiveEnergyGoal),
-            pendingExerciseGoals: try container.decodeIfPresent([ExerciseGoal].self, forKey: .pendingExerciseGoals) ?? [],
-            pendingExerciseGoalDeletions: try container.decodeIfPresent(Set<UUID>.self, forKey: .pendingExerciseGoalDeletions) ?? [],
-            pendingTimeBlockGoal: try container.decodeIfPresent(TimeBlockGoal.self, forKey: .pendingTimeBlockGoal),
-            pendingGoalEffectiveDate: try container.decodeIfPresent(Date.self, forKey: .pendingGoalEffectiveDate)
+            blockingStrategy: try container.decodeIfPresent(BlockingStrategy.self, forKey: .blockingStrategy) ?? .all
         )
     }
 
@@ -374,16 +273,6 @@ struct HealthGoal: Codable, Sendable, Equatable {
         try container.encode(exerciseGoals, forKey: .exerciseGoals)
         try container.encode(timeBlockGoal, forKey: .timeBlockGoal)
         try container.encode(blockingStrategy, forKey: .blockingStrategy)
-        try container.encodeIfPresent(pendingStepGoal, forKey: .pendingStepGoal)
-        try container.encodeIfPresent(pendingActiveEnergyGoal, forKey: .pendingActiveEnergyGoal)
-        if !pendingExerciseGoals.isEmpty {
-            try container.encode(pendingExerciseGoals, forKey: .pendingExerciseGoals)
-        }
-        if !pendingExerciseGoalDeletions.isEmpty {
-            try container.encode(pendingExerciseGoalDeletions, forKey: .pendingExerciseGoalDeletions)
-        }
-        try container.encodeIfPresent(pendingTimeBlockGoal, forKey: .pendingTimeBlockGoal)
-        try container.encodeIfPresent(pendingGoalEffectiveDate, forKey: .pendingGoalEffectiveDate)
     }
 
     // MARK: - Persistence

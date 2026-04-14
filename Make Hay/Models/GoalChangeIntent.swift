@@ -36,7 +36,7 @@ enum GoalChangeIntent: Sendable {
             } else if proposed.stepGoal.target > original.stepGoal.target {
                 hasHarder = true
             }
-            // Removing today from repeat schedule is easier (defers to tomorrow)
+            // Removing today from a repeat schedule makes the current guardrail easier
             if original.stepGoal.schedule.includestoday
                 && !proposed.stepGoal.schedule.includestoday {
                 hasEasier = true

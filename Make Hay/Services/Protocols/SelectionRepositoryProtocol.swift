@@ -25,17 +25,4 @@ protocol SelectionRepositoryProtocol: Sendable {
     /// Atomically saves the active selection with file protection.
     /// - Throws: If encoding or the protected write fails.
     nonisolated func saveSelection(_ selection: FamilyActivitySelection) throws
-
-    /// Loads the persisted pending selection, if any.
-    nonisolated func loadPendingSelection() -> FamilyActivitySelection?
-
-    /// Loads the persisted pending selection effective date, if any.
-    nonisolated func loadPendingSelectionDate() -> Date?
-
-    /// Atomically saves the pending selection and its effective date with file protection.
-    /// - Throws: If encoding or the protected write fails.
-    nonisolated func savePendingSelection(_ selection: FamilyActivitySelection, effectiveDate: Date) throws
-
-    /// Deletes any persisted pending-selection artifacts.
-    nonisolated func clearPendingSelection()
 }

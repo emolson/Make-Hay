@@ -14,8 +14,4 @@ import Foundation
 struct MockSelectionRepository: SelectionRepositoryProtocol, Sendable {
     nonisolated func loadSelection() -> FamilyActivitySelection { FamilyActivitySelection() }
     nonisolated func saveSelection(_ selection: FamilyActivitySelection) throws {}
-    nonisolated func loadPendingSelection() -> FamilyActivitySelection? { nil }
-    nonisolated func loadPendingSelectionDate() -> Date? { nil }
-    nonisolated func savePendingSelection(_ selection: FamilyActivitySelection, effectiveDate: Date) throws {}
-    nonisolated func clearPendingSelection() {}
 }

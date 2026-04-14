@@ -95,13 +95,10 @@ struct DashboardView: View {
                     editGoalSheet(for: goal)
                 }
                 .sheet(item: $pendingRemovalProposal) { proposal in
-                    PendingGoalChangeView(
-                        context: .goalChange
-                    ) {
-                        viewModel.schedulePendingGoal(proposal.goal)
-                    } onEmergencyUnlock: {
+                    PendingGoalChangeView(context: .goalChange) {
                         Task {
                             await viewModel.applyEmergencyChange(proposal.goal)
+                            pendingRemovalProposal = nil
                         }
                     }
                 }
@@ -183,14 +180,6 @@ struct DashboardView: View {
             // run recently and the displayed blocking state may be outdated.
             if SharedStorage.isEvaluationStale && !viewModel.isLoading {
                 staleDataBanner
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets())
-            }
-
-            // Banners Section
-            if viewModel.healthGoal.hasPendingChanges {
-                pendingChangeBanner
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets())
@@ -340,48 +329,6 @@ struct DashboardView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 60)
     }
-    
-
-    
-    /// Banner shown when a goal change is scheduled for tomorrow.
-    /// **Why show this?** Provides transparency about pending changes and allows cancellation.
-    private var pendingChangeBanner: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "calendar.badge.clock")
-                .font(.title3)
-                .foregroundStyle(Color.statusInfo)
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(String(localized: "Goal Update Scheduled"))
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                
-                if let effectiveDate = viewModel.healthGoal.pendingGoalEffectiveDate {
-                    Text("Takes effect at \(effectiveDate, style: .time)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            
-            Spacer()
-            
-            Button {
-                viewModel.cancelPendingGoal()
-            } label: {
-                Text(String(localized: "Cancel"))
-                    .font(.caption)
-                    .fontWeight(.medium)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .accessibilityIdentifier("cancelPendingButton")
-        }
-        .padding()
-        .background(Color.statusInfo.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal, 16)
-        .accessibilityIdentifier("pendingChangeBanner")
-    }
-
     /// Banner warning that a shield update failed. The blocking state displayed
     /// may not match the actual device state.
     private func shieldWarningBanner(message: String) -> some View {

@@ -220,15 +220,11 @@ struct GoalConfigurationView: View {
             Text(String(localized: "Are you sure you want to remove this goal? This cannot be undone."))
         }
         .sheet(item: $pendingProposal) { proposal in
-            PendingGoalChangeView(
-                context: .goalChange
-            ) {
-                viewModel.schedulePendingGoal(proposal.goal)
-                dismiss()
-            } onEmergencyUnlock: {
+            PendingGoalChangeView(context: .goalChange) {
                 // Apply immediately via emergency unlock
                 Task {
                     await viewModel.applyEmergencyChange(proposal.goal)
+                    pendingProposal = nil
                     triggerSuccessHaptic = true
                     try? await Task.sleep(for: .milliseconds(150))
                     dismiss()

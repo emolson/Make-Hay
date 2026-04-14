@@ -135,10 +135,6 @@ struct AppPickerView: View {
         )) {
             PendingGoalChangeView(context: .blockedAppsChange) {
                 Task {
-                    await viewModel.schedulePendingSelection()
-                }
-            } onEmergencyUnlock: {
-                Task {
                     await viewModel.applyEmergencySelectionChange()
                 }
             }

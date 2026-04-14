@@ -25,11 +25,6 @@ actor MockBlockerService: BlockerServiceProtocol {
 
     /// Cached serialized snapshot for read APIs.
     private var selectionSnapshot: AppSelectionSnapshot = .empty
-
-    /// Pending selection and effective date for deferred edits.
-    var pendingSelection: FamilyActivitySelection?
-    private var pendingSelectionSnapshot: AppSelectionSnapshot?
-    var pendingSelectionEffectiveDate: Date?
     
     /// Returns the mock authorization status.
     var isAuthorized: Bool {
@@ -69,50 +64,6 @@ actor MockBlockerService: BlockerServiceProtocol {
     /// - Returns: The current selection as a serialized snapshot.
     func getSelection() async -> AppSelectionSnapshot {
         selectionSnapshot
-    }
-
-    func setPendingSelection(_ selection: AppSelectionSnapshot, effectiveDate: Date) async throws {
-        if shouldThrowError {
-            throw BlockerServiceError.configurationUpdateFailed
-        }
-
-        pendingSelection = try selection.decodedSelection()
-        pendingSelectionSnapshot = selection
-        pendingSelectionEffectiveDate = effectiveDate
-    }
-
-    func getPendingSelection() async -> PendingAppSelection? {
-        guard let pendingSelectionSnapshot,
-              let pendingSelectionEffectiveDate else {
-            return nil
-        }
-
-        return PendingAppSelection(
-            selection: pendingSelectionSnapshot,
-            effectiveDate: pendingSelectionEffectiveDate
-        )
-    }
-
-    @discardableResult
-    func applyPendingSelectionIfReady() async throws -> Bool {
-        guard let pendingSelection,
-              let pendingSelectionEffectiveDate,
-              Date() >= pendingSelectionEffectiveDate else {
-            return false
-        }
-
-        selection = pendingSelection
-        selectionSnapshot = pendingSelectionSnapshot ?? Self.snapshotOrEmpty(from: pendingSelection)
-        self.pendingSelection = nil
-        self.pendingSelectionSnapshot = nil
-        self.pendingSelectionEffectiveDate = nil
-        return true
-    }
-
-    func cancelPendingSelection() async {
-        pendingSelection = nil
-        pendingSelectionSnapshot = nil
-        pendingSelectionEffectiveDate = nil
     }
     
     /// Returns the current blocking state. Useful for test assertions.

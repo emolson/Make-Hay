@@ -45,7 +45,7 @@ final class AppPickerViewModel {
     /// Error description forwarded to the alert message.
     private(set) var errorMessage: String = ""
 
-    /// Whether the next-day confirmation guard sheet should be shown.
+    /// Whether the breathing pause sheet should be shown.
     var showingPendingConfirmation: Bool = false
 
     // MARK: - Computed Properties
@@ -73,7 +73,7 @@ final class AppPickerViewModel {
     private let healthService: any HealthServiceProtocol
     private let goalStatusProvider: any GoalStatusProvider
 
-    /// Selection currently awaiting user confirmation for schedule/emergency paths.
+    /// Selection currently awaiting user confirmation for the emergency unlock path.
     private var pendingSelectionCandidate: FamilyActivitySelection?
     
     /// Reference to the in-flight picker-dismissed task.
@@ -105,7 +105,6 @@ final class AppPickerViewModel {
     /// Loads the committed selection from the service.
     /// Called once from the view's `.task` modifier on first appear.
     func loadCurrentSelection() async {
-        _ = try? await blockerService.applyPendingSelectionIfReady()
         let persistedSnapshot = await blockerService.getSelection()
         do {
             persistedSelection = try persistedSnapshot.decodedSelection()
@@ -138,30 +137,7 @@ final class AppPickerViewModel {
         }
     }
 
-    /// Schedules the pending selection to apply at local midnight tomorrow.
-    func schedulePendingSelection() async {
-        guard let pendingSelectionCandidate else { return }
-
-        isSaving = true
-        defer { isSaving = false }
-
-        do {
-            let pendingSelectionSnapshot = try AppSelectionSnapshot(selection: pendingSelectionCandidate)
-            try await blockerService.setPendingSelection(
-                pendingSelectionSnapshot,
-                effectiveDate: Date.localMidnightTomorrow()
-            )
-            self.pendingSelectionCandidate = nil
-            showingPendingConfirmation = false
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
-        } catch {
-            UINotificationFeedbackGenerator().notificationOccurred(.error)
-            errorMessage = error.localizedDescription
-            showError = true
-        }
-    }
-
-    /// Applies the pending selection immediately, bypassing next-day deferral.
+    /// Applies the pending selection immediately after the breathing pause.
     func applyEmergencySelectionChange() async {
         guard let pendingSelectionCandidate else { return }
 
@@ -199,7 +175,7 @@ final class AppPickerViewModel {
         await persistSelection(selection)
     }
 
-    /// Returns true when edits must be deferred behind the next-day guard.
+    /// Returns true when edits must be gated behind the breathing pause.
     ///
     /// **Policy:** Uses the latest cached evaluation snapshot for gate decisions.
     /// If no snapshot is available, defaults to deferred mode to avoid bypass.
@@ -219,7 +195,6 @@ final class AppPickerViewModel {
         defer { isSaving = false }
 
         do {
-            await blockerService.cancelPendingSelection()
             let selectionSnapshot = try AppSelectionSnapshot(selection: selection)
             try await blockerService.setSelection(selectionSnapshot)
             let hasApps = !selection.applicationTokens.isEmpty || !selection.categoryTokens.isEmpty
