@@ -58,7 +58,7 @@ struct DashboardView: View {
     
     /// Tracks a removal that must be deferred (swipe-to-delete while blocked).
     /// **Why separate from `editingGoal`?** Sheet destinations differ: edit opens
-    /// `GoalConfigurationView`, while deferred removal opens `PendingGoalChangeView`.
+    /// `GoalConfigurationView`, while deferred removal opens `GuardrailInterceptionView`.
     @State private var pendingRemovalProposal: DashboardPendingGoalProposal?
     
     // MARK: - Body
@@ -95,7 +95,7 @@ struct DashboardView: View {
                     editGoalSheet(for: goal)
                 }
                 .sheet(item: $pendingRemovalProposal) { proposal in
-                    PendingGoalChangeView(context: .goalChange) {
+                    GuardrailInterceptionView(context: .goalChange) {
                         Task {
                             await viewModel.applyEmergencyChange(proposal.goal)
                             pendingRemovalProposal = nil

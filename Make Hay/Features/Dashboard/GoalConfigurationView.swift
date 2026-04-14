@@ -220,7 +220,7 @@ struct GoalConfigurationView: View {
             Text(String(localized: "Are you sure you want to remove this goal? This cannot be undone."))
         }
         .sheet(item: $pendingProposal) { proposal in
-            PendingGoalChangeView(context: .goalChange) {
+            GuardrailInterceptionView(context: .goalChange) {
                 // Apply immediately via emergency unlock
                 Task {
                     await viewModel.applyEmergencyChange(proposal.goal)

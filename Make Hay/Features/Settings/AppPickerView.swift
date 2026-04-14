@@ -133,7 +133,7 @@ struct AppPickerView: View {
             get: { viewModel.showingPendingConfirmation },
             set: { viewModel.showingPendingConfirmation = $0 }
         )) {
-            PendingGoalChangeView(context: .blockedAppsChange) {
+            GuardrailInterceptionView(context: .blockedAppsChange) {
                 Task {
                     await viewModel.applyEmergencySelectionChange()
                 }

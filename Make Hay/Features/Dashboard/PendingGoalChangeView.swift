@@ -8,7 +8,7 @@
 import SwiftUI
 
 /// Context describing which guarded change flow is being confirmed.
-enum PendingChangeContext {
+enum PendingChangeContext: Sendable {
     case goalChange
     case blockedAppsChange
 
@@ -21,6 +21,10 @@ enum PendingChangeContext {
         }
     }
 
+    var interceptionNavigationTitle: String {
+        String(localized: "Hold On")
+    }
+
     var headline: String {
         String(localized: "Take a Deep Breath")
     }
@@ -29,13 +33,17 @@ enum PendingChangeContext {
         String(localized: "Breathe in through your nose and out through your mouth. Think about if unblocking is a need or a want.")
     }
 
-    var emergencyWarningDescription: String {
+    var forfeitWarning: String {
         switch self {
         case .goalChange:
             return String(localized: "Emergency unlocks forfeit today's progress. This change will take effect immediately.")
         case .blockedAppsChange:
             return String(localized: "Emergency unlock applies your blocked-app changes immediately, even before goals are met.")
         }
+    }
+
+    var emergencyWarningDescription: String {
+        forfeitWarning
     }
 }
 
