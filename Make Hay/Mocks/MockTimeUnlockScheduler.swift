@@ -19,6 +19,8 @@ import Foundation
 final class MockTimeUnlockScheduler: TimeUnlockScheduling, Sendable {
     private(set) var scheduledUnlockMinutes: Int?
     private(set) var cancelCallCount: Int = 0
+    private(set) var scheduledPeekEndDate: Date?
+    private(set) var cancelPeekEndCallCount: Int = 0
 
     func scheduleUnlock(unlockMinutes: Int) throws {
         scheduledUnlockMinutes = unlockMinutes
@@ -27,5 +29,14 @@ final class MockTimeUnlockScheduler: TimeUnlockScheduling, Sendable {
     func cancelUnlock() {
         cancelCallCount += 1
         scheduledUnlockMinutes = nil
+    }
+
+    func schedulePeekEnd(at endDate: Date) throws {
+        scheduledPeekEndDate = endDate
+    }
+
+    func cancelPeekEnd() {
+        cancelPeekEndCallCount += 1
+        scheduledPeekEndDate = nil
     }
 }

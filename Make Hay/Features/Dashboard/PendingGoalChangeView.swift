@@ -11,6 +11,7 @@ import SwiftUI
 enum PendingChangeContext: Sendable {
     case goalChange
     case blockedAppsChange
+    case peekRequest
 
     var navigationTitle: String {
         switch self {
@@ -18,19 +19,36 @@ enum PendingChangeContext: Sendable {
             return String(localized: "Pause Before Unlocking")
         case .blockedAppsChange:
             return String(localized: "Pause Before Editing")
+        case .peekRequest:
+            return String(localized: "Mindful Peek")
         }
     }
 
     var interceptionNavigationTitle: String {
-        String(localized: "Hold On")
+        switch self {
+        case .peekRequest:
+            return String(localized: "Use Your Daily Peek?")
+        default:
+            return String(localized: "Hold On")
+        }
     }
 
     var headline: String {
-        String(localized: "Take a Deep Breath")
+        switch self {
+        case .peekRequest:
+            return String(localized: "Mindful Peek")
+        default:
+            return String(localized: "Take a Deep Breath")
+        }
     }
 
     var message: String {
-        String(localized: "Breathe in through your nose and out through your mouth. Think about if unblocking is a need or a want.")
+        switch self {
+        case .peekRequest:
+            return String(localized: "You'll have 3 minutes of unrestricted access. This is your only peek today — make it count.")
+        default:
+            return String(localized: "Breathe in through your nose and out through your mouth. Think about if unblocking is a need or a want.")
+        }
     }
 
     var forfeitWarning: String {
@@ -39,6 +57,8 @@ enum PendingChangeContext: Sendable {
             return String(localized: "Emergency unlocks forfeit today's progress. This change will take effect immediately.")
         case .blockedAppsChange:
             return String(localized: "Emergency unlock applies your blocked-app changes immediately, even before goals are met.")
+        case .peekRequest:
+            return String(localized: "This is your only peek today. Your apps will re-lock automatically in 3 minutes.")
         }
     }
 

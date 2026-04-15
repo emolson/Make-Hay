@@ -17,7 +17,13 @@ import UIKit
 struct GuardrailInterceptionView: View {
 
     /// Duration (seconds) the user must continuously hold to pass the active-pause phase.
-    private static let holdDuration: TimeInterval = 15
+    /// Peek uses a shorter hold (10s) since it doesn't permanently alter goals.
+    private var holdDuration: TimeInterval {
+        switch context {
+        case .peekRequest: return 10
+        default: return 15
+        }
+    }
 
     /// Phases of the interception flow.
     private enum Phase: Equatable {
@@ -176,7 +182,8 @@ struct GuardrailInterceptionView: View {
     }
 
     private var holdCircle: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: holdStartDate == nil)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: holdStartDate == nil)) {
+            timeline in
             let progress = holdProgress(at: timeline.date)
 
             ZStack {
@@ -244,7 +251,11 @@ struct GuardrailInterceptionView: View {
             }
             .accessibilityIdentifier("forfeitWarningText")
 
-            SlideToForfeitControl {
+            SlideToForfeitControl(
+                label: context == .peekRequest
+                    ? String(localized: "Slide to Activate Peek")
+                    : String(localized: "Slide to Forfeit and Unlock")
+            ) {
                 onEmergencyUnlock()
                 dismiss()
             }
@@ -285,17 +296,26 @@ struct GuardrailInterceptionView: View {
         let formatted = remaining.formatted()
         switch goal.type {
         case .steps:
-            return String(localized: "You are only \(formatted) steps away from reaching your goal today.")
+            return String(
+                localized: "You are only \(formatted) steps away from reaching your goal today.")
         case .activeEnergy:
-            return String(localized: "You are only \(formatted) kcal away from reaching your goal today.")
+            return String(
+                localized: "You are only \(formatted) kcal away from reaching your goal today.")
         case .exercise:
-            return String(localized: "You are only \(formatted) minutes of exercise away from reaching your goal today.")
+            return String(
+                localized:
+                    "You are only \(formatted) minutes of exercise away from reaching your goal today."
+            )
         case .timeUnlock:
-            return String(localized: "You are only \(formatted) minutes away from your unlock time.")
+            return String(
+                localized: "You are only \(formatted) minutes away from your unlock time.")
         }
     }
 
     private var lossAversionWarningMessage: String {
+        if context == .peekRequest {
+            return String(localized: "Using your daily peek won't reset your progress, but your apps will re-lock in 3 minutes.")
+        }
         guard closestUnmetGoal != nil else {
             return String(localized: "Continue only if you still need an immediate override.")
         }
@@ -314,11 +334,11 @@ struct GuardrailInterceptionView: View {
     private func holdProgress(at date: Date) -> CGFloat {
         guard let startDate = holdStartDate else { return 0 }
         let elapsed = date.timeIntervalSince(startDate)
-        return min(max(0, elapsed / Self.holdDuration), 1.0)
+        return min(max(0, elapsed / holdDuration), 1.0)
     }
 
     private func holdTimeRemaining(progress: CGFloat) -> String {
-        let remaining = max(0, Int(ceil(Self.holdDuration * (1.0 - progress))))
+        let remaining = max(0, Int(ceil(holdDuration * (1.0 - progress))))
         return "\(remaining)s"
     }
 
@@ -340,7 +360,7 @@ struct GuardrailInterceptionView: View {
 
         while !Task.isCancelled {
             let elapsed = Date().timeIntervalSince(startDate)
-            let progress = elapsed / Self.holdDuration
+            let progress = elapsed / holdDuration
 
             if progress >= 1.0 {
                 let notification = UINotificationFeedbackGenerator()
@@ -380,6 +400,7 @@ struct GuardrailInterceptionView: View {
 /// it cannot be triggered accidentally or by a mindless tap reflex.
 private struct SlideToForfeitControl: View {
 
+    let label: String
     let onComplete: () -> Void
 
     @State private var dragOffset: CGFloat = 0
@@ -402,7 +423,7 @@ private struct SlideToForfeitControl: View {
                     .fill(Color.statusWarning.opacity(0.2))
                     .frame(width: dragOffset + thumbSize + trackPadding)
 
-                Text(String(localized: "Slide to Forfeit and Unlock"))
+                Text(label)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary.opacity(1.0 - Double(normalizedProgress)))
                     .frame(maxWidth: .infinity)
@@ -442,7 +463,7 @@ private struct SlideToForfeitControl: View {
         }
         .frame(height: thumbSize + (trackPadding * 2))
         .accessibilityIdentifier("slideToForfeit")
-        .accessibilityLabel(String(localized: "Slide to forfeit and unlock"))
+        .accessibilityLabel(label)
         .accessibilityAddTraits(.allowsDirectInteraction)
     }
 }
@@ -455,4 +476,8 @@ private struct SlideToForfeitControl: View {
 
 #Preview("Blocked Apps Change") {
     GuardrailInterceptionView(context: .blockedAppsChange) {}
+}
+
+#Preview("Peek Request") {
+    GuardrailInterceptionView(context: .peekRequest) {}
 }

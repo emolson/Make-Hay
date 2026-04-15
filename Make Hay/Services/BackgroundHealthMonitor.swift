@@ -591,7 +591,7 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
                 }
             }
 
-            try await blockerService.updateShields(shouldBlock: result.shouldBlock)
+            try await blockerService.updateShields(shouldBlock: result.shouldBlock && !SharedStorage.isPeekActive)
 
             // Persist the snapshot and record success in shared freshness metadata.
             SharedStorage.lastEvaluationSnapshot = result

@@ -77,6 +77,11 @@ final class MakeHayDeviceActivityMonitor: DeviceActivityMonitor {
     nonisolated override func intervalDidStart(for activity: DeviceActivityName) {
         super.intervalDidStart(for: activity)
 
+        if activity == .makeHayPeekEnd {
+            handlePeekEnd()
+            return
+        }
+
         guard activity == .makeHayTimeUnlock else { return }
 
         Self.logger.info("Time unlock interval started.")
@@ -132,6 +137,16 @@ final class MakeHayDeviceActivityMonitor: DeviceActivityMonitor {
 
         Self.logger.info("Time unlock interval ended.")
 
+        // Don't re-shield if a Mindful Peek is currently active — the peek timer
+        // (or its DeviceActivity monitor) will re-apply shields when it expires.
+        if let defaults = UserDefaults(suiteName: "group.ethanolson.Make-Hay") {
+            let peekExpiration = defaults.double(forKey: peekExpirationDateKey)
+            if peekExpiration > 0 && Date().timeIntervalSince1970 < peekExpiration {
+                Self.logger.info("Mindful Peek is active — skipping re-shield at interval end.")
+                return
+            }
+        }
+
         // Only re-shield if the time-block goal is still enabled and scheduled today.
         guard let info = Self.loadTimeBlockInfo(), info.isEnabled else {
             Self.logger.info("Time-block goal disabled or unreadable — skipping re-shield.")
@@ -173,6 +188,43 @@ final class MakeHayDeviceActivityMonitor: DeviceActivityMonitor {
         }
 
         Self.logger.info("Shields re-applied after time unlock interval ended.")
+    }
+
+    // MARK: - Mindful Peek End
+
+    /// Re-applies shields when the Mindful Peek timer expires.
+    ///
+    /// **Fail-closed:** If the persisted selection can't be loaded, shields stay cleared
+    /// but the next background health evaluation will re-block. We nil the expiration
+    /// date in SharedStorage so `isPeekActive` returns false and the foreground app
+    /// (if open) also re-blocks.
+    nonisolated private func handlePeekEnd() {
+        Self.logger.info("Peek-end interval started — re-applying shields.")
+
+        // Expire the peek in SharedStorage so both the app and future evaluations
+        // know the peek is over.
+        guard let defaults = UserDefaults(suiteName: "group.ethanolson.Make-Hay") else {
+            Self.logger.error("App Group UserDefaults unavailable — cannot expire peek.")
+            return
+        }
+        defaults.removeObject(forKey: peekExpirationDateKey)
+
+        guard let selection = Self.loadPersistedSelection() else {
+            Self.logger.warning("No persisted app selection — cannot re-shield after peek. Next evaluation will re-block.")
+            return
+        }
+
+        if !selection.applicationTokens.isEmpty {
+            store.shield.applications = selection.applicationTokens
+        }
+        if !selection.categoryTokens.isEmpty {
+            store.shield.applicationCategories = ShieldSettings.ActivityCategoryPolicy.specific(
+                selection.categoryTokens,
+                except: Set()
+            )
+        }
+
+        Self.logger.info("Shields re-applied after Mindful Peek expired.")
     }
 
     /// Reads the time-block goal info from App Group UserDefaults.

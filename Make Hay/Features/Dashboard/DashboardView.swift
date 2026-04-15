@@ -60,6 +60,9 @@ struct DashboardView: View {
     /// **Why separate from `editingGoal`?** Sheet destinations differ: edit opens
     /// `GoalConfigurationView`, while deferred removal opens `GuardrailInterceptionView`.
     @State private var pendingRemovalProposal: DashboardPendingGoalProposal?
+
+    /// Controls presentation of the Mindful Peek interception flow.
+    @State private var isShowingPeekInterception: Bool = false
     
     // MARK: - Body
     
@@ -102,6 +105,14 @@ struct DashboardView: View {
                         }
                     }
                 }
+                .sheet(isPresented: $isShowingPeekInterception) {
+                    GuardrailInterceptionView(context: .peekRequest) {
+                        Task {
+                            await viewModel.activatePeek()
+                            isShowingPeekInterception = false
+                        }
+                    }
+                }
                 .task {
                     await permissionManager.refresh(reason: "dashboard.task")
                     await viewModel.onAppear(reason: "dashboard.task")
@@ -117,6 +128,7 @@ struct DashboardView: View {
                         // foreground. Health data sync is handled by
                         // MainTabView's unified scenePhase handler.
                         viewModel.updateTimeTickTimer()
+                        Task { await viewModel.resumePeekIfNeeded() }
                     }
                 }
                 .onChange(of: viewModel.isGoalMet) { oldValue, newValue in
@@ -158,6 +170,15 @@ struct DashboardView: View {
     
     private var goalsView: some View {
         List {
+            // Peek Countdown Banner — shown at the very top while a
+            // Mindful Peek is active so the timer is always visible.
+            if viewModel.isPeekActive {
+                peekCountdownBanner
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets())
+            }
+
             // Permissions Banner — shown prominently above all other content
             // when HealthKit or Screen Time access has been revoked.
             if permissionManager.isPermissionMissing {
@@ -280,6 +301,35 @@ struct DashboardView: View {
                         }
                     } header: {
                         Text(String(localized: "NOT SCHEDULED TODAY"))
+                    }
+                }
+
+                // Mindful Peek Section — activation button or "used" indicator.
+                // Shown only while the user is currently blocked.
+                if viewModel.isBlocking {
+                    if viewModel.isPeekAvailable {
+                        Section {
+                            Button {
+                                isShowingPeekInterception = true
+                            } label: {
+                                Label(
+                                    String(localized: "I need to check something quickly"),
+                                    systemImage: "eye.circle"
+                                )
+                            }
+                            .accessibilityIdentifier("peekActivationButton")
+                        }
+                    } else if viewModel.isPeekUsedToday {
+                        Section {
+                            HStack(spacing: 8) {
+                                Image(systemName: "eye.slash")
+                                    .foregroundStyle(.tertiary)
+                                Text(String(localized: "Daily peek used"))
+                                    .font(.subheadline)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .accessibilityIdentifier("peekUsedIndicator")
+                        }
                     }
                 }
             }
@@ -436,6 +486,32 @@ struct DashboardView: View {
             }
         )
     }
+
+    /// Countdown banner displayed while a Mindful Peek is active.
+    /// Shows remaining time so the user can gauge urgency at a glance.
+    private var peekCountdownBanner: some View {
+        let minutes = Int(viewModel.peekTimeRemaining) / 60
+        let seconds = Int(viewModel.peekTimeRemaining) % 60
+        let formatted = String(format: "%d:%02d", minutes, seconds)
+
+        return HStack(spacing: 10) {
+            Image(systemName: "timer")
+                .foregroundStyle(Color.statusWarning)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(String(localized: "Apps unblocked for \(formatted)"))
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                Text(String(localized: "Get in, get out."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding()
+        .background(Color.statusWarning.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 16)
+        .accessibilityIdentifier("peekCountdownBanner")
+    }
     
     private var errorView: some View {
         VStack(spacing: 20) {
@@ -497,6 +573,14 @@ struct DashboardView: View {
 #Preview("Error State") {
     DashboardView()
         .environment(\.dashboardViewModel, DashboardViewModel(healthService: ErrorThrowingMockHealthService(), blockerService: MockBlockerService()))
+}
+
+#Preview("Peek Active") {
+    let vm = DashboardViewModel(healthService: MockHealthService(), blockerService: MockBlockerService())
+    vm.isPeekActive = true
+    vm.peekTimeRemaining = 142
+    return DashboardView()
+        .environment(\.dashboardViewModel, vm)
 }
 
 // MARK: - Preview Helper

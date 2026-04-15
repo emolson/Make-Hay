@@ -135,6 +135,27 @@ final class DashboardViewModel: GoalStatusProvider {
     
     /// Controls presentation of the Add Goal sheet.
     var isShowingAddGoal: Bool = false
+
+    // MARK: - Mindful Peek State
+
+    /// Whether a Mindful Peek is currently active (shields temporarily lifted).
+    var isPeekActive: Bool = false
+
+    /// Seconds remaining on the active peek countdown. Updated every second.
+    var peekTimeRemaining: TimeInterval = 0
+
+    /// Whether the user can activate a Mindful Peek right now.
+    ///
+    /// Requirements: currently blocked and peek hasn't been used today.
+    /// `isBlocking` already implies at least one enabled goal is active.
+    var isPeekAvailable: Bool {
+        isBlocking && !isPeekActive && SharedStorage.isPeekAvailableToday
+    }
+
+    /// Whether the user already used their daily peek (but it's no longer active).
+    var isPeekUsedToday: Bool {
+        !SharedStorage.isPeekAvailableToday && !isPeekActive
+    }
     
     /// The last day number the app checked for steps.
     /// Used to detect when a new day has started and reset blocking accordingly.
@@ -341,6 +362,10 @@ final class DashboardViewModel: GoalStatusProvider {
     @ObservationIgnored
     private var timeTickTask: Task<Void, Never>?
 
+    /// Reference to the running peek countdown timer task.
+    @ObservationIgnored
+    private var peekTimerTask: Task<Void, Never>?
+
     /// Re-entrancy flag for `loadGoals()`. Prevents multiple foreground / observer
     /// triggers from stacking redundant `syncNow()` calls on the actor.
     @ObservationIgnored
@@ -393,6 +418,7 @@ final class DashboardViewModel: GoalStatusProvider {
         )
         refreshGoalFromStorage()
         updateTimeTickTimer()
+        await resumePeekIfNeeded()
         await loadGoals(reason: reason)
     }
     
@@ -690,6 +716,135 @@ final class DashboardViewModel: GoalStatusProvider {
         scheduleTimeUnlockIfNeeded()
         await syncAndApply()
     }
+
+    // MARK: - Mindful Peek
+
+    /// Activates the daily Mindful Peek: lifts shields for 3 minutes and starts
+    /// a foreground countdown timer.
+    ///
+    /// **Transactional:** Shields are lifted first. If that fails, SharedStorage is
+    /// never written so the daily peek is not consumed. If the backup DeviceActivity
+    /// monitor can't be scheduled, we roll back the unblock so the user isn't left
+    /// with no hard cutoff.
+    func activatePeek() async {
+        // Step 1 — Lift shields. If this fails the daily peek is NOT consumed.
+        do {
+            try await blockerService.updateShields(shouldBlock: false)
+        } catch {
+            Self.logger.error("Failed to lift shields for Mindful Peek.")
+            shieldWarning = error.localizedDescription
+            return
+        }
+
+        // Step 2 — Commit peek state to SharedStorage (now the daily peek is used).
+        SharedStorage.activatePeek()
+        guard let expiration = SharedStorage.peekExpirationDate else { return }
+
+        // Step 3 — Schedule the DeviceActivity backup monitor. If this fails,
+        // roll back: clear peek state and re-block so the user isn't left with
+        // an unguarded unlock window.
+        do {
+            try timeUnlockScheduler.schedulePeekEnd(at: expiration)
+        } catch {
+            Self.logger.error("Failed to schedule peek-end DeviceActivity monitor.")
+            SharedStorage.clearPeek()
+            do {
+                try await blockerService.updateShields(shouldBlock: true)
+            } catch {
+                Self.logger.error("Failed to roll back shields after peek scheduling failure.")
+            }
+            shieldWarning = String(localized: "Couldn't start Mindful Peek — please try again.")
+            return
+        }
+
+        // Step 4 — Update observable UI state and start the foreground timer.
+        isPeekActive = true
+        peekTimeRemaining = max(0, expiration.timeIntervalSinceNow)
+        startPeekCountdownTimer()
+    }
+
+    /// Expires the active peek, re-applies shields, and cleans up timers.
+    ///
+    /// **Fail-closed ordering:** The DeviceActivity backup monitor stays armed until
+    /// the in-process re-evaluation succeeds. If `syncNow()` throws, the extension
+    /// callback is the remaining safety net that will re-shield.
+    func expirePeek() async {
+        peekTimerTask?.cancel()
+        peekTimerTask = nil
+
+        SharedStorage.expirePeek()
+        isPeekActive = false
+        peekTimeRemaining = 0
+
+        // Re-evaluate and re-block. Only disarm the backup after success.
+        do {
+            let result = try await backgroundHealthMonitor.syncNow(reason: "dashboard.peekExpired")
+            applyEvaluationResult(result)
+            timeUnlockScheduler.cancelPeekEnd()
+        } catch {
+            Self.logger.error("Failed to re-evaluate after Mindful Peek expired.")
+            shieldWarning = error.localizedDescription
+            // Keep the backup monitor armed so the extension still enforces the cutoff.
+        }
+    }
+
+    /// Checks SharedStorage for an in-flight peek on app foreground and resumes or
+    /// expires it as appropriate.
+    ///
+    /// **Why needed?** If the app was backgrounded or killed and relaunched during a
+    /// peek, this method synchronises the ViewModel's observable state with the
+    /// persisted peek data.
+    func resumePeekIfNeeded() async {
+        guard let expiration = SharedStorage.peekExpirationDate else {
+            // No active peek in storage.
+            if isPeekActive {
+                // ViewModel thought peek was active but storage says otherwise
+                // (e.g. extension expired it). Sync state.
+                isPeekActive = false
+                peekTimeRemaining = 0
+            }
+            return
+        }
+
+        if Date() >= expiration {
+            // Peek was active but has since expired (app was killed during peek).
+            await expirePeek()
+        } else {
+            // Peek is still active — resume the countdown.
+            isPeekActive = true
+            peekTimeRemaining = max(0, expiration.timeIntervalSinceNow)
+            startPeekCountdownTimer()
+        }
+    }
+
+    /// Starts a per-second timer that counts down the remaining peek duration.
+    /// On expiry, calls `expirePeek()` to re-apply shields.
+    private func startPeekCountdownTimer() {
+        peekTimerTask?.cancel()
+        peekTimerTask = Task { [weak self] in
+            do {
+                while true {
+                    try await Task.sleep(for: .seconds(1))
+                    guard let self else { return }
+
+                    guard let expiration = SharedStorage.peekExpirationDate else {
+                        // Peek was expired externally (extension or another process).
+                        await self.expirePeek()
+                        return
+                    }
+
+                    let remaining = expiration.timeIntervalSinceNow
+                    if remaining <= 0 {
+                        await self.expirePeek()
+                        return
+                    }
+                    self.peekTimeRemaining = remaining
+                }
+            } catch {
+                // CancellationError — timer stopped, exit cleanly.
+            }
+        }
+    }
     
     /// Returns whether easier goal edits should be deferred behind the pending-change flow.
     ///
@@ -727,6 +882,11 @@ final class DashboardViewModel: GoalStatusProvider {
             currentSteps = 0
             currentActiveEnergy = 0
             currentExerciseMinutes = [:]
+
+            // Reset the daily Mindful Peek allowance for the new day.
+            SharedStorage.clearPeek()
+            isPeekActive = false
+            peekTimeRemaining = 0
         }
 
         // Disable any one-time goals whose today-only schedule has expired.
