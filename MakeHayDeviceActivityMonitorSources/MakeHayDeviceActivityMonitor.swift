@@ -5,8 +5,8 @@
 //  Created by GitHub Copilot on 2/19/26.
 //
 
-import FamilyControls
 @preconcurrency import DeviceActivity
+import FamilyControls
 import Foundation
 import ManagedSettings
 import os.log
@@ -40,8 +40,11 @@ private struct GoalScheduleInfo: Decodable {
 
             self.isEnabled = (try? container.decode(Bool.self, forKey: .isEnabled)) ?? false
 
-            guard let schedContainer = try? container.nestedContainer(keyedBy: ScheduleKeys.self, forKey: .schedule),
-                  let type = try? schedContainer.decode(String.self, forKey: .type) else {
+            guard
+                let schedContainer = try? container.nestedContainer(
+                    keyedBy: ScheduleKeys.self, forKey: .schedule),
+                let type = try? schedContainer.decode(String.self, forKey: .type)
+            else {
                 self.schedule = nil
                 return
             }
@@ -100,7 +103,8 @@ final class MakeHayDeviceActivityMonitor: DeviceActivityMonitor {
                 case .recurring(let days):
                     let today = Calendar.current.component(.weekday, from: Date())
                     guard days.contains(today) else {
-                        Self.logger.info("Recurring schedule inactive today; skipping shield clear.")
+                        Self.logger.info(
+                            "Recurring schedule inactive today; skipping shield clear.")
                         return
                     }
                 case .todayOnly(let expires):
@@ -210,7 +214,9 @@ final class MakeHayDeviceActivityMonitor: DeviceActivityMonitor {
         defaults.removeObject(forKey: peekExpirationDateKey)
 
         guard let selection = Self.loadPersistedSelection() else {
-            Self.logger.warning("No persisted app selection — cannot re-shield after peek. Next evaluation will re-block.")
+            Self.logger.warning(
+                "No persisted app selection — cannot re-shield after peek. Next evaluation will re-block."
+            )
             return
         }
 
@@ -261,9 +267,11 @@ final class MakeHayDeviceActivityMonitor: DeviceActivityMonitor {
     /// `BlockerService`'s in-memory selection. The main app persists the selection as a
     /// PropertyList file in the shared App Group container, which the extension reads here.
     nonisolated private static func loadPersistedSelection() -> FamilyActivitySelection? {
-        guard let containerURL = FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: "group.ethanolson.Make-Hay"
-        ) else {
+        guard
+            let containerURL = FileManager.default.containerURL(
+                forSecurityApplicationGroupIdentifier: "group.ethanolson.Make-Hay"
+            )
+        else {
             logger.error("App Group container URL unavailable in extension.")
             return nil
         }

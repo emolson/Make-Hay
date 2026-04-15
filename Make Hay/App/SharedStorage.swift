@@ -58,7 +58,8 @@ enum SharedStorage {
     private nonisolated static let healthPermissionGrantedKey = "healthPermissionGranted"
 
     /// Key used to persist whether the HealthKit permission sheet has already been shown.
-    private nonisolated static let healthAuthorizationPromptShownKey = "healthAuthorizationPromptShown"
+    private nonisolated static let healthAuthorizationPromptShownKey =
+        "healthAuthorizationPromptShown"
 
     /// Key used to persist whether Screen Time authorization was granted during onboarding.
     private nonisolated static let screenTimePermissionGrantedKey = "screenTimePermissionGranted"
@@ -157,7 +158,9 @@ enum SharedStorage {
     /// The source that produced the most recent successful evaluation.
     nonisolated static var lastEvaluationSource: EvaluationSource? {
         get {
-            guard let raw = appGroupDefaults.string(forKey: lastEvaluationSourceKey) else { return nil }
+            guard let raw = appGroupDefaults.string(forKey: lastEvaluationSourceKey) else {
+                return nil
+            }
             return EvaluationSource(rawValue: raw)
         }
         set {
@@ -232,7 +235,9 @@ enum SharedStorage {
     /// round-trip (the snapshot is at most seconds old after a foreground sync).
     nonisolated static var lastEvaluationSnapshot: EvaluationResult? {
         get {
-            guard let data = appGroupDefaults.data(forKey: lastEvaluationSnapshotKey) else { return nil }
+            guard let data = appGroupDefaults.data(forKey: lastEvaluationSnapshotKey) else {
+                return nil
+            }
             return try? JSONDecoder().decode(EvaluationResult.self, from: data)
         }
         set {

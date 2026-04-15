@@ -314,7 +314,10 @@ struct GuardrailInterceptionView: View {
 
     private var lossAversionWarningMessage: String {
         if context == .peekRequest {
-            return String(localized: "Using your daily peek won't reset your progress, but your apps will re-lock in 3 minutes.")
+            return String(
+                localized:
+                    "Using your daily peek won't reset your progress, but your apps will re-lock in 3 minutes."
+            )
         }
         guard closestUnmetGoal != nil else {
             return String(localized: "Continue only if you still need an immediate override.")

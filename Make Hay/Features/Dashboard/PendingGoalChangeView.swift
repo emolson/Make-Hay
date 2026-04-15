@@ -45,20 +45,35 @@ enum PendingChangeContext: Sendable {
     var message: String {
         switch self {
         case .peekRequest:
-            return String(localized: "You'll have 3 minutes of unrestricted access. This is your only peek today — make it count.")
+            return String(
+                localized:
+                    "You'll have 3 minutes of unrestricted access. This is your only peek today — make it count."
+            )
         default:
-            return String(localized: "Breathe in through your nose and out through your mouth. Think about if unblocking is a need or a want.")
+            return String(
+                localized:
+                    "Breathe in through your nose and out through your mouth. Think about if unblocking is a need or a want."
+            )
         }
     }
 
     var forfeitWarning: String {
         switch self {
         case .goalChange:
-            return String(localized: "Emergency unlocks forfeit today's progress. This change will take effect immediately.")
+            return String(
+                localized:
+                    "Emergency unlocks forfeit today's progress. This change will take effect immediately."
+            )
         case .blockedAppsChange:
-            return String(localized: "Emergency unlock applies your blocked-app changes immediately, even before goals are met.")
+            return String(
+                localized:
+                    "Emergency unlock applies your blocked-app changes immediately, even before goals are met."
+            )
         case .peekRequest:
-            return String(localized: "This is your only peek today. Your apps will re-lock automatically in 3 minutes.")
+            return String(
+                localized:
+                    "This is your only peek today. Your apps will re-lock automatically in 3 minutes."
+            )
         }
     }
 
@@ -76,13 +91,13 @@ struct PendingGoalChangeView: View {
     private static let totalDuration: TimeInterval = breathPhaseDuration * Double(breathRounds * 2)
     private static let minimumBreathScale: CGFloat = 0.82
     private static let maximumBreathScale: CGFloat = 1.2
-    
+
     // MARK: - Environment
-    
+
     @Environment(\.dismiss) private var dismiss
-    
+
     // MARK: - State
-    
+
     /// Tracks whether to show the emergency unlock flow.
     @State private var showingEmergencyUnlock: Bool = false
 
@@ -97,22 +112,22 @@ struct PendingGoalChangeView: View {
 
     /// Callback invoked when the user confirms an emergency unlock.
     let onEmergencyUnlock: () -> Void
-    
+
     // MARK: - Body
-    
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 32) {
                 Spacer()
-                
+
                 headerIcon
 
                 countdownRing
-                
+
                 messageContent
-                
+
                 Spacer()
-                
+
                 actionButtons
             }
             .padding()
@@ -143,9 +158,9 @@ struct PendingGoalChangeView: View {
             }
         }
     }
-    
+
     // MARK: - View Components
-    
+
     private var headerIcon: some View {
         Image(systemName: "wind")
             .font(.system(size: 60))
@@ -182,14 +197,14 @@ struct PendingGoalChangeView: View {
             .accessibilityValue(metrics.accessibilityValue)
         }
     }
-    
+
     private var messageContent: some View {
         VStack(spacing: 16) {
             Text(context.headline)
                 .font(.title2)
                 .fontWeight(.bold)
                 .multilineTextAlignment(.center)
-            
+
             Text(context.message)
                 .font(.body)
                 .foregroundStyle(.secondary)
@@ -198,7 +213,7 @@ struct PendingGoalChangeView: View {
         }
         .accessibilityIdentifier("pendingChangeMessage")
     }
-    
+
     private var actionButtons: some View {
         VStack(spacing: 12) {
             if emergencyUnlockAvailable {
@@ -214,21 +229,26 @@ struct PendingGoalChangeView: View {
                 .controlSize(.large)
                 .accessibilityIdentifier("emergencyUnlockButton")
             } else {
-                Text(String(localized: "Emergency unlock becomes available when the breathing cycle ends."))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 18)
-                    .background(Color.surfaceCard, in: RoundedRectangle(cornerRadius: 14))
-                    .accessibilityIdentifier("emergencyUnlockCountdownHint")
+                Text(
+                    String(
+                        localized:
+                            "Emergency unlock becomes available when the breathing cycle ends.")
+                )
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 18)
+                .background(Color.surfaceCard, in: RoundedRectangle(cornerRadius: 14))
+                .accessibilityIdentifier("emergencyUnlockCountdownHint")
             }
         }
     }
 
     private func timelineDate(for currentDate: Date) -> Date {
         guard emergencyUnlockAvailable,
-              let breathingStartDate else {
+            let breathingStartDate
+        else {
             return currentDate
         }
 
@@ -257,7 +277,8 @@ struct PendingGoalChangeView: View {
         let isInhalePhase = phaseIndex.isMultiple(of: 2)
         let instruction = String(localized: isInhalePhase ? "Inhale" : "Exhale")
         let scaleRange = Self.maximumBreathScale - Self.minimumBreathScale
-        let textScale = isInhalePhase
+        let textScale =
+            isInhalePhase
             ? Self.minimumBreathScale + (scaleRange * phaseProgress)
             : Self.maximumBreathScale - (scaleRange * phaseProgress)
         let breathNumber = min((phaseIndex / 2) + 1, Self.breathRounds)

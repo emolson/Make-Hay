@@ -5,8 +5,8 @@
 //  Created by Ethan Olson on 12/31/25.
 //
 
-import SwiftUI
 import HealthKit
+import SwiftUI
 
 /// Wraps a proposed `HealthGoal` for `.sheet(item:)` presentation.
 /// **Why not share `GoalConfigurationView.PendingGoalProposal`?** That type is
@@ -22,16 +22,16 @@ private struct DashboardPendingGoalProposal: Identifiable {
 /// **Why no business logic here?** Following MVVM, the View is purely declarative.
 /// All state management and async operations are handled by DashboardViewModel.
 struct DashboardView: View {
-    
+
     // MARK: - State
-    
+
     /// The shared dashboard view model, injected via the environment.
     /// **Why `@Environment` instead of `@State`?** The VM is shared state owned by the
     /// app root (via `AppDependencyContainer`), not by this view. `@Environment` is
     /// semantically correct for shared, externally-owned dependencies and makes
     /// previews trivially mockable via environment key defaults.
     @Environment(\.dashboardViewModel) private var viewModel
-    
+
     /// Shared permission manager providing HealthKit and Screen Time authorization state.
     /// **Why `@Environment`?** Permissions are now managed by a centralised
     /// `PermissionManager` rather than duplicated in the ViewModel and SettingsView.
@@ -39,23 +39,23 @@ struct DashboardView: View {
 
     /// Shared app navigation state used to route permission recovery to the Settings tab.
     @Environment(\.appNavigation) private var appNavigation
-    
+
     /// Tracks the current scene phase to respond to app lifecycle events.
     /// **Why observe scenePhase?** We need to refresh the time-tick timer
     /// when the app comes back to the foreground so the time-block progress
     /// bar resumes updating.
     @Environment(\.scenePhase) private var scenePhase
-    
+
     /// Tracks whether to trigger celebration haptic feedback.
     /// Set to true when the user achieves their goal, triggering a success haptic.
     @State private var triggerSuccessHaptic: Bool = false
 
     /// Tracks the previous value of `isGoalMet` for reactive haptic detection.
     @State private var previousGoalMet: Bool = false
-    
+
     /// Tracks the goal currently being edited (nil when not editing).
     @State private var editingGoal: GoalProgress?
-    
+
     /// Tracks a removal that must be deferred (swipe-to-delete while blocked).
     /// **Why separate from `editingGoal`?** Sheet destinations differ: edit opens
     /// `GoalConfigurationView`, while deferred removal opens `GuardrailInterceptionView`.
@@ -63,9 +63,9 @@ struct DashboardView: View {
 
     /// Controls presentation of the Mindful Peek interception flow.
     @State private var isShowingPeekInterception: Bool = false
-    
+
     // MARK: - Body
-    
+
     var body: some View {
         NavigationStack {
             content
@@ -88,10 +88,12 @@ struct DashboardView: View {
                         : Color.surfaceGrouped.ignoresSafeArea()
                 )
                 .animation(.easeInOut(duration: 1.0), value: viewModel.isGoalMet)
-                .sheet(isPresented: Binding(
-                    get: { viewModel.isShowingAddGoal },
-                    set: { viewModel.isShowingAddGoal = $0 }
-                )) {
+                .sheet(
+                    isPresented: Binding(
+                        get: { viewModel.isShowingAddGoal },
+                        set: { viewModel.isShowingAddGoal = $0 }
+                    )
+                ) {
                     AddGoalView(viewModel: viewModel)
                 }
                 .sheet(item: $editingGoal) { goal in
@@ -141,9 +143,9 @@ struct DashboardView: View {
                 .sensoryFeedback(.success, trigger: triggerSuccessHaptic)
         }
     }
-    
+
     // MARK: - Content Views
-    
+
     @ViewBuilder
     private var content: some View {
         if viewModel.isLoading {
@@ -154,20 +156,20 @@ struct DashboardView: View {
             goalsView
         }
     }
-    
+
     private var loadingView: some View {
         VStack(spacing: 20) {
             ProgressView()
                 .scaleEffect(1.5)
                 .accessibilityIdentifier("loadingIndicator")
-            
+
             Text(String(localized: "Loading your goals..."))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-    
+
     private var goalsView: some View {
         List {
             // Peek Countdown Banner — shown at the very top while a
@@ -236,7 +238,8 @@ struct DashboardView: View {
                                                 exerciseGoalId: goal.exerciseGoalId
                                             )
                                         case .deferred(let proposedGoal):
-                                            pendingRemovalProposal = DashboardPendingGoalProposal(goal: proposedGoal)
+                                            pendingRemovalProposal = DashboardPendingGoalProposal(
+                                                goal: proposedGoal)
                                         }
                                     }
                                 } label: {
@@ -289,7 +292,8 @@ struct DashboardView: View {
                                                 exerciseGoalId: goal.exerciseGoalId
                                             )
                                         case .deferred(let proposedGoal):
-                                            pendingRemovalProposal = DashboardPendingGoalProposal(goal: proposedGoal)
+                                            pendingRemovalProposal = DashboardPendingGoalProposal(
+                                                goal: proposedGoal)
                                         }
                                     }
                                 } label: {
@@ -341,7 +345,7 @@ struct DashboardView: View {
         }
         .accessibilityIdentifier("Dashboard.goalsList")
     }
-    
+
     /// Empty state prompting the user to add their first goal.
     /// **Why centered?** Provides a clean, focused starting point that avoids
     /// cluttering the list while no goals are present.
@@ -351,19 +355,19 @@ struct DashboardView: View {
                 .font(.system(size: 48))
                 .foregroundStyle(.tint)
                 .accessibilityIdentifier("emptyGoalsIcon")
-            
+
             VStack(spacing: 8) {
                 Text(String(localized: "No Goals Yet"))
                     .font(.headline)
                     .foregroundStyle(.primary)
-                
+
                 Text(String(localized: "Add a health goal to start unblocking your apps."))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
             .padding(.horizontal, 32)
-            
+
             Button {
                 viewModel.isShowingAddGoal = true
             } label: {
@@ -429,9 +433,14 @@ struct DashboardView: View {
                     .font(.subheadline)
                     .fontWeight(.semibold)
 
-                Text(String(localized: "Background health sync hasn't run recently. Pull to refresh or tap Retry."))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(
+                    String(
+                        localized:
+                            "Background health sync hasn't run recently. Pull to refresh or tap Retry."
+                    )
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
 
             Spacer()
@@ -452,7 +461,7 @@ struct DashboardView: View {
         .padding(.horizontal, 16)
         .accessibilityIdentifier("staleDataBanner")
     }
-    
+
     /// Creates an edit sheet for the specified goal progress.
     /// **Why a separate method?** Extracts the complexity of finding the exercise goal
     /// and constructing the proper edit mode from the sheet modifier.
@@ -464,7 +473,7 @@ struct DashboardView: View {
             }
             return nil
         }()
-        
+
         NavigationStack {
             GoalConfigurationView(
                 viewModel: viewModel,
@@ -474,7 +483,7 @@ struct DashboardView: View {
             )
         }
     }
-    
+
     /// Prominent banner alerting the user that one or both required permissions
     /// have been revoked. Delegates rendering to `PermissionsBannerView`.
     private var permissionsBanner: some View {
@@ -512,18 +521,18 @@ struct DashboardView: View {
         .padding(.horizontal, 16)
         .accessibilityIdentifier("peekCountdownBanner")
     }
-    
+
     private var errorView: some View {
         VStack(spacing: 20) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.dashboardErrorIcon)
                 .foregroundStyle(Color.statusWarning)
                 .accessibilityIdentifier("errorIcon")
-            
+
             Text(String(localized: "Unable to Load Goals"))
                 .font(.title2)
                 .fontWeight(.semibold)
-            
+
             if let errorMessage = viewModel.errorMessage {
                 Text(errorMessage)
                     .font(.subheadline)
@@ -532,7 +541,7 @@ struct DashboardView: View {
                     .padding(.horizontal)
                     .accessibilityIdentifier("errorMessage")
             }
-            
+
             Button {
                 Task {
                     await viewModel.loadGoals(reason: "dashboard.errorRetry")
@@ -563,7 +572,9 @@ struct DashboardView: View {
     // Override the default environment with high-value mocks to show "goal met" state.
     let mock = MockHealthService(steps: 12_500, activeEnergy: 650, exerciseMinutes: 45)
     DashboardView()
-        .environment(\.dashboardViewModel, DashboardViewModel(healthService: mock, blockerService: MockBlockerService()))
+        .environment(
+            \.dashboardViewModel,
+            DashboardViewModel(healthService: mock, blockerService: MockBlockerService()))
 }
 
 #Preview("Loading State") {
@@ -572,11 +583,16 @@ struct DashboardView: View {
 
 #Preview("Error State") {
     DashboardView()
-        .environment(\.dashboardViewModel, DashboardViewModel(healthService: ErrorThrowingMockHealthService(), blockerService: MockBlockerService()))
+        .environment(
+            \.dashboardViewModel,
+            DashboardViewModel(
+                healthService: ErrorThrowingMockHealthService(),
+                blockerService: MockBlockerService()))
 }
 
 #Preview("Peek Active") {
-    let vm = DashboardViewModel(healthService: MockHealthService(), blockerService: MockBlockerService())
+    let vm = DashboardViewModel(
+        healthService: MockHealthService(), blockerService: MockBlockerService())
     vm.isPeekActive = true
     vm.peekTimeRemaining = 142
     return DashboardView()
@@ -594,19 +610,19 @@ private actor ErrorThrowingMockHealthService: HealthServiceProtocol {
     var authorizationPromptShown: Bool {
         get async { true }
     }
-    
+
     func requestAuthorization() async throws {
         throw HealthServiceError.authorizationDenied
     }
-    
+
     func fetchDailySteps() async throws -> Int {
         throw HealthServiceError.authorizationDenied
     }
-    
+
     func fetchActiveEnergy() async throws -> Double {
         throw HealthServiceError.authorizationDenied
     }
-    
+
     func fetchExerciseMinutes(for activityType: HKWorkoutActivityType?) async throws -> Int {
         throw HealthServiceError.authorizationDenied
     }

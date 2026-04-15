@@ -104,7 +104,7 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
         [
             HKQuantityType.quantityType(forIdentifier: .stepCount),
             HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned),
-            HKQuantityType.quantityType(forIdentifier: .appleExerciseTime)
+            HKQuantityType.quantityType(forIdentifier: .appleExerciseTime),
         ].compactMap { $0 }
     }()
 
@@ -477,7 +477,8 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
 
         do {
             guard hasGoals else {
-                Self.logger.debug("No enabled goals — clearing shields and skipping background evaluation.")
+                Self.logger.debug(
+                    "No enabled goals — clearing shields and skipping background evaluation.")
                 let result = EvaluationResult(
                     steps: 0,
                     activeEnergy: 0,
@@ -513,7 +514,8 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
                     // Compute current time for time-block goal evaluation.
                     let now = Date()
                     let components = Calendar.current.dateComponents([.hour, .minute], from: now)
-                    let minutesSinceMidnight = (components.hour ?? 0) * 60 + (components.minute ?? 0)
+                    let minutesSinceMidnight =
+                        (components.hour ?? 0) * 60 + (components.minute ?? 0)
 
                     let snapshot = GoalEvaluationSnapshot(
                         steps: currentData.steps,
@@ -567,7 +569,8 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
             // If all fetched values are zero and HealthKit authorization is unconfirmed,
             // assume permissions were revoked. Clear shields to avoid permanently trapping
             // the user behind a block they can never satisfy.
-            let allZero = result.steps == 0
+            let allZero =
+                result.steps == 0
                 && result.activeEnergy == 0
                 && result.exerciseMinutesByGoalId.values.allSatisfy { $0 == 0 }
 
@@ -591,7 +594,8 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
                 }
             }
 
-            try await blockerService.updateShields(shouldBlock: result.shouldBlock && !SharedStorage.isPeekActive)
+            try await blockerService.updateShields(
+                shouldBlock: result.shouldBlock && !SharedStorage.isPeekActive)
 
             // Persist the snapshot and record success in shared freshness metadata.
             SharedStorage.lastEvaluationSnapshot = result
@@ -604,10 +608,11 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
             Self.logger.error("Background evaluation timed out; shields unchanged.")
             SharedStorage.recordEvaluationFailure(.timeout)
             if throwOnFailure { throw HealthServiceError.queryTimedOut }
-            return SharedStorage.lastEvaluationSnapshot ?? EvaluationResult(
-                steps: 0, activeEnergy: 0, exerciseMinutesByGoalId: [:],
-                shouldBlock: false, timestamp: Date()
-            )
+            return SharedStorage.lastEvaluationSnapshot
+                ?? EvaluationResult(
+                    steps: 0, activeEnergy: 0, exerciseMinutesByGoalId: [:],
+                    shouldBlock: false, timestamp: Date()
+                )
         } catch is CancellationError {
             // External cancellation (e.g. foreground debounce replaced the
             // previous task). Not a timeout — propagate silently so the caller
@@ -619,10 +624,11 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
             Self.logger.error("Background evaluation failed; shields unchanged.")
             SharedStorage.recordEvaluationFailure(failureReason)
             if throwOnFailure { throw error }
-            return SharedStorage.lastEvaluationSnapshot ?? EvaluationResult(
-                steps: 0, activeEnergy: 0, exerciseMinutesByGoalId: [:],
-                shouldBlock: false, timestamp: Date()
-            )
+            return SharedStorage.lastEvaluationSnapshot
+                ?? EvaluationResult(
+                    steps: 0, activeEnergy: 0, exerciseMinutesByGoalId: [:],
+                    shouldBlock: false, timestamp: Date()
+                )
         }
     }
 
@@ -633,12 +639,12 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
         case is CancellationError:
             return .timeout
         case HealthServiceError.authorizationDenied,
-             BlockerServiceError.authorizationFailed,
-             BlockerServiceError.notAuthorized:
+            BlockerServiceError.authorizationFailed,
+            BlockerServiceError.notAuthorized:
             return .authorizationUnavailable
         case HealthServiceError.healthKitNotAvailable,
-             HealthServiceError.queryFailed,
-             HealthServiceError.queryTimedOut:
+            HealthServiceError.queryFailed,
+            HealthServiceError.queryTimedOut:
             return .healthDataUnavailable
         case BlockerServiceError.configurationUpdateFailed:
             return .shieldUpdateFailed
