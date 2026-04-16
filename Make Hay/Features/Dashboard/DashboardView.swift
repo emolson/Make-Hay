@@ -37,7 +37,6 @@ struct DashboardView: View {
     /// `PermissionManager` rather than duplicated in the ViewModel and SettingsView.
     @Environment(\.permissionManager) private var permissionManager
 
-    /// Shared app navigation state used to route permission recovery to the Settings tab.
     @Environment(\.appNavigation) private var appNavigation
 
     /// Tracks the current scene phase to respond to app lifecycle events.
@@ -52,7 +51,6 @@ struct DashboardView: View {
 
     /// Tracks the previous value of `isGoalMet` for reactive haptic detection.
     @State private var previousGoalMet: Bool = false
-
     /// Tracks the goal currently being edited (nil when not editing).
     @State private var editingGoal: GoalProgress?
 
@@ -61,27 +59,12 @@ struct DashboardView: View {
     /// `GoalConfigurationView`, while deferred removal opens `GuardrailInterceptionView`.
     @State private var pendingRemovalProposal: DashboardPendingGoalProposal?
 
-    /// Controls presentation of the Mindful Peek interception flow.
-    @State private var isShowingPeekInterception: Bool = false
-
     // MARK: - Body
 
     var body: some View {
         NavigationStack {
             content
                 .navigationTitle(String(localized: "Make Hay"))
-                .toolbar {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            viewModel.isShowingAddGoal = true
-                        } label: {
-                            Image(systemName: "plus")
-                        }
-                        .disabled(!viewModel.canAddMoreGoals)
-                        .accessibilityIdentifier("addGoalToolbarButton")
-                        .accessibilityLabel(String(localized: "Add Goal"))
-                    }
-                }
                 .background(
                     viewModel.isGoalMet
                         ? Color.surfaceUnlocked.ignoresSafeArea()
@@ -104,14 +87,6 @@ struct DashboardView: View {
                         Task {
                             await viewModel.applyEmergencyChange(proposal.goal)
                             pendingRemovalProposal = nil
-                        }
-                    }
-                }
-                .sheet(isPresented: $isShowingPeekInterception) {
-                    GuardrailInterceptionView(context: .peekRequest) {
-                        Task {
-                            await viewModel.activatePeek()
-                            isShowingPeekInterception = false
                         }
                     }
                 }
@@ -209,9 +184,13 @@ struct DashboardView: View {
             }
 
             if viewModel.goalProgresses.isEmpty && viewModel.inactiveGoalProgresses.isEmpty {
-                emptyGoalsDisplay
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
+                Section {
+                    emptyGoalsDisplay
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                } header: {
+                    yourGoalsHeader
+                }
             } else {
                 // Active Goals Section — goals scheduled for today.
                 // Each row supports swipe-to-delete.
@@ -250,7 +229,7 @@ struct DashboardView: View {
                             }
                         }
                     } header: {
-                        Text(String(localized: "YOUR GOALS"))
+                        yourGoalsHeader
                     }
                 } else {
                     // All goals exist but none are scheduled for today
@@ -265,7 +244,7 @@ struct DashboardView: View {
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.vertical, 24)
                     } header: {
-                        Text(String(localized: "YOUR GOALS"))
+                        yourGoalsHeader
                     }
                 }
 
@@ -304,36 +283,7 @@ struct DashboardView: View {
                             }
                         }
                     } header: {
-                        Text(String(localized: "NOT SCHEDULED TODAY"))
-                    }
-                }
-
-                // Mindful Peek Section — activation button or "used" indicator.
-                // Shown only while the user is currently blocked.
-                if viewModel.isBlocking {
-                    if viewModel.isPeekAvailable {
-                        Section {
-                            Button {
-                                isShowingPeekInterception = true
-                            } label: {
-                                Label(
-                                    String(localized: "I need to check something quickly"),
-                                    systemImage: "eye.circle"
-                                )
-                            }
-                            .accessibilityIdentifier("peekActivationButton")
-                        }
-                    } else if viewModel.isPeekUsedToday {
-                        Section {
-                            HStack(spacing: 8) {
-                                Image(systemName: "eye.slash")
-                                    .foregroundStyle(.tertiary)
-                                Text(String(localized: "Daily peek used"))
-                                    .font(.subheadline)
-                                    .foregroundStyle(.tertiary)
-                            }
-                            .accessibilityIdentifier("peekUsedIndicator")
-                        }
+                        notScheduledTodayHeader
                     }
                 }
             }
@@ -346,9 +296,9 @@ struct DashboardView: View {
         .accessibilityIdentifier("Dashboard.goalsList")
     }
 
-    /// Empty state prompting the user to add their first goal.
-    /// **Why centered?** Provides a clean, focused starting point that avoids
-    /// cluttering the list while no goals are present.
+    /// Empty state shown inside the goals section when no goals exist yet.
+    /// **Why no inline CTA button here?** The header owns the add-goal affordance so
+    /// the section title and entry point stay visually paired.
     private var emptyGoalsDisplay: some View {
         VStack(spacing: 16) {
             Image(systemName: "plus.circle.fill")
@@ -361,28 +311,62 @@ struct DashboardView: View {
                     .font(.headline)
                     .foregroundStyle(.primary)
 
-                Text(String(localized: "Add a health goal to start unblocking your apps."))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+                Text(
+                    String(
+                        localized:
+                            "Tap the plus to add a health goal and start unblocking your apps.")
+                )
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
             }
             .padding(.horizontal, 32)
-
-            Button {
-                viewModel.isShowingAddGoal = true
-            } label: {
-                Text(String(localized: "Add First Goal"))
-                    .font(.headline)
-                    .frame(minWidth: 160)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .padding(.top, 8)
-            .accessibilityIdentifier("getStartedButton")
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 60)
     }
+
+    /// Header for the primary goals section.
+    /// **Why put add here?** The action stays available without competing with the
+    /// goal rows or needing a dedicated placeholder row at the bottom.
+    private var yourGoalsHeader: some View {
+        HStack {
+            Text(String(localized: "YOUR GOALS"))
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            if viewModel.canAddMoreGoals {
+                Button {
+                    viewModel.isShowingAddGoal = true
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("addGoalHeaderButton")
+                .accessibilityLabel(String(localized: "Add Goal"))
+            }
+        }
+    }
+
+    /// Header for the inactive goals section.
+    /// **Why smaller?** It stays readable, but visually recedes behind the primary
+    /// goals header so the active goals remain the focal point.
+    private var notScheduledTodayHeader: some View {
+        HStack {
+            Text(String(localized: "NOT SCHEDULED TODAY"))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.tertiary)
+
+            Spacer()
+        }
+    }
+
     /// Banner warning that a shield update failed. The blocking state displayed
     /// may not match the actual device state.
     private func shieldWarningBanner(message: String) -> some View {

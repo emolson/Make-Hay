@@ -14,10 +14,10 @@ struct Make_HayApp: App {
     /// factory/lifecycle owner. We keep a strong reference so services live for the
     /// app's lifetime; individual services are injected into the environment below.
     private let container = AppDependencyContainer()
-    
+
     /// Persisted flag indicating whether onboarding has been completed.
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
-    
+
     var body: some Scene {
         WindowGroup {
             if hasCompletedOnboarding {
@@ -33,6 +33,5 @@ struct Make_HayApp: App {
         .environment(\.dashboardViewModel, container.dashboardViewModel)
         .environment(\.permissionManager, container.permissionManager)
         .environment(\.appNavigation, container.appNavigation)
-        .environment(\.backgroundHealthMonitor, container.backgroundHealthMonitor)
     }
 }

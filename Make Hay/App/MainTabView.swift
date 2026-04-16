@@ -15,9 +15,9 @@ import SwiftUI
 /// Child views read their own dependencies from the environment — no manual threading.
 ///
 /// **Why observe `scenePhase` here?** This root-level hook always refreshes permission
-/// state on foreground resume, but only triggers a dashboard health sync when the
-/// Dashboard tab is visible. That keeps Settings responsive and avoids off-screen
-/// sync churn while still refreshing the data users are actively looking at.
+/// state and restores any in-flight daily-pass countdown on foreground resume. It then
+/// refreshes whichever shared dashboard state the current tab depends on, without
+/// forcing Settings through dashboard-only loading UI.
 struct MainTabView: View {
 
     private static let minimumForegroundSyncInterval: TimeInterval = 5
@@ -39,22 +39,24 @@ struct MainTabView: View {
 
     /// Timestamp of the last foreground sync attempt.
     @State private var lastForegroundSyncDate: Date?
-    
+
     var body: some View {
-        TabView(selection: Binding(
-            get: { appNavigation.selectedTab },
-            set: { appNavigation.selectedTab = $0 }
-        )) {
+        TabView(
+            selection: Binding(
+                get: { appNavigation.selectedTab },
+                set: { appNavigation.selectedTab = $0 }
+            )
+        ) {
             DashboardView()
-            .tag(AppTab.dashboard)
-            .tabItem {
-                Label(
-                    String(localized: "Dashboard"),
-                    systemImage: "chart.bar.fill"
-                )
-            }
-            .accessibilityIdentifier("dashboardTab")
-            
+                .tag(AppTab.dashboard)
+                .tabItem {
+                    Label(
+                        String(localized: "Dashboard"),
+                        systemImage: "chart.bar.fill"
+                    )
+                }
+                .accessibilityIdentifier("dashboardTab")
+
             SettingsView()
                 .tag(AppTab.settings)
                 .tabItem {
@@ -96,38 +98,52 @@ struct MainTabView: View {
 
                 // Always refresh permissions — the user may have returned from
                 // iOS Settings after toggling HealthKit or Screen Time access.
-                await permissionManager.refresh(reason: "mainTab.scenePhase.active.\(currentTabName)")
+                await permissionManager.refresh(
+                    reason: "mainTab.scenePhase.active.\(currentTabName)")
 
-                // The Settings screen only needs fresh permission state on resume.
-                // Full health sync is deferred to the Dashboard or explicit manual refresh.
-                guard currentTab == .dashboard else {
-                    AppLogger.trace(
-                        category: Self.traceCategory,
-                        message: "Skipping foreground health sync because the selected tab is settings. id=\(refreshID)"
-                    )
-                    return
-                }
+                let hadPersistedPeek = SharedStorage.peekExpirationDate != nil
+
+                // The daily pass can now be surfaced from Settings as well as
+                // Dashboard, so its countdown state must resume regardless of tab.
+                await dashboardViewModel.resumePeekIfNeeded()
 
                 if let lastForegroundSyncDate,
-                   Date().timeIntervalSince(lastForegroundSyncDate) < Self.minimumForegroundSyncInterval {
+                    Date().timeIntervalSince(lastForegroundSyncDate)
+                        < Self.minimumForegroundSyncInterval
+                {
                     AppLogger.trace(
                         category: Self.traceCategory,
-                        message: "Suppressing foreground health sync because cooldown is active. id=\(refreshID)"
+                        message:
+                            "Suppressing foreground health sync because cooldown is active. id=\(refreshID)"
                     )
                     return
                 }
 
                 lastForegroundSyncDate = Date()
 
-                // Unified sync: loadGoals() internally calls syncNow() which
-                // fetches health data, evaluates goals, updates shields, and
-                // persists the snapshot — all in one pipeline.
-                await dashboardViewModel.loadGoals(reason: "mainTab.scenePhase.active.dashboard")
+                if currentTab == .dashboard {
+                    // Unified sync: loadGoals() internally calls syncNow() which
+                    // fetches health data, evaluates goals, updates shields, and
+                    // persists the snapshot — all in one pipeline.
+                    await dashboardViewModel.loadGoals(
+                        reason: "mainTab.scenePhase.active.dashboard")
 
-                AppLogger.trace(
-                    category: Self.traceCategory,
-                    message: "Foreground health sync finished. id=\(refreshID)"
-                )
+                    AppLogger.trace(
+                        category: Self.traceCategory,
+                        message: "Foreground health sync finished. id=\(refreshID)"
+                    )
+                } else if !dashboardViewModel.isPeekActive,
+                    !hadPersistedPeek || dashboardViewModel.shieldWarning != nil
+                {
+                    await dashboardViewModel.refreshBlockingState(
+                        reason: "mainTab.scenePhase.active.settings")
+
+                    AppLogger.trace(
+                        category: Self.traceCategory,
+                        message:
+                            "Foreground blocking refresh finished for settings. id=\(refreshID)"
+                    )
+                }
             }
         }
     }

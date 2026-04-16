@@ -497,20 +497,58 @@ final class DashboardViewModel: GoalStatusProvider {
             // On failure, only reuse a cached snapshot when it is still fresh
             // for the current day. Otherwise keep the conservative local state
             // (for example, the midnight reset to zero progress).
-            if let snapshot = SharedStorage.lastEvaluationSnapshot,
-                snapshot.isFreshForCurrentDay()
-            {
-                applyEvaluationResult(snapshot)
-            } else {
-                isBlocking = GoalBlockingEvaluator.shouldBlock(
-                    goal: healthGoal,
-                    snapshot: goalEvaluationSnapshot()
-                )
-            }
+            applyLatestAvailableBlockingState()
             errorMessage = error.localizedDescription
             AppLogger.trace(
                 category: Self.traceCategory,
                 message: "loadGoals failed with surfaced error. reason=\(reason)"
+            )
+        }
+    }
+
+    /// Refreshes blocking-related state without driving dashboard-only loading or error UI.
+    ///
+    /// **Why separate from `loadGoals()`?** Settings now depends on fresh blocking state
+    /// for the daily pass, but it should not trigger dashboard spinners, error screens,
+    /// or the off-screen time-tick timer.
+    func refreshBlockingState(reason: String) async {
+        guard !isSyncing else {
+            AppLogger.trace(
+                category: Self.traceCategory,
+                message: "refreshBlockingState already in progress — skipping. reason=\(reason)"
+            )
+            return
+        }
+        isSyncing = true
+        defer { isSyncing = false }
+
+        AppLogger.trace(
+            category: Self.traceCategory,
+            message: "refreshBlockingState started. reason=\(reason)"
+        )
+
+        checkForNewDay()
+        refreshGoalFromStorage()
+
+        do {
+            let result = try await backgroundHealthMonitor.syncNow(
+                reason: "dashboard.refreshBlockingState.\(reason)")
+            applyEvaluationResult(result)
+            scheduleTimeUnlockIfNeeded()
+            AppLogger.trace(
+                category: Self.traceCategory,
+                message: "refreshBlockingState completed successfully. reason=\(reason)"
+            )
+        } catch is CancellationError {
+            AppLogger.trace(
+                category: Self.traceCategory,
+                message: "refreshBlockingState cancelled. reason=\(reason)"
+            )
+        } catch {
+            applyLatestAvailableBlockingState()
+            AppLogger.trace(
+                category: Self.traceCategory,
+                message: "refreshBlockingState failed; using best available state. reason=\(reason)"
             )
         }
     }
@@ -744,6 +782,11 @@ final class DashboardViewModel: GoalStatusProvider {
 
     // MARK: - Mindful Peek
 
+    enum PeekActivationResult: Sendable, Equatable {
+        case activated
+        case failed(message: String)
+    }
+
     /// Activates the daily Mindful Peek: lifts shields for 3 minutes and starts
     /// a foreground countdown timer.
     ///
@@ -751,41 +794,47 @@ final class DashboardViewModel: GoalStatusProvider {
     /// never written so the daily peek is not consumed. If the backup DeviceActivity
     /// monitor can't be scheduled, we roll back the unblock so the user isn't left
     /// with no hard cutoff.
-    func activatePeek() async {
+    @discardableResult
+    func activatePeek() async -> PeekActivationResult {
+        shieldWarning = nil
+
         // Step 1 — Lift shields. If this fails the daily peek is NOT consumed.
         do {
             try await blockerService.updateShields(shouldBlock: false)
         } catch {
             Self.logger.error("Failed to lift shields for Mindful Peek.")
-            shieldWarning = error.localizedDescription
-            return
+            return .failed(message: error.localizedDescription)
         }
 
         // Step 2 — Commit peek state to SharedStorage (now the daily peek is used).
         SharedStorage.activatePeek()
-        guard let expiration = SharedStorage.peekExpirationDate else { return }
+        guard let expiration = SharedStorage.peekExpirationDate else {
+            let message = String(
+                localized: "Couldn't start Daily 3-Minute Pass — please try again.")
+            await rollbackFailedPeekActivation()
+            return .failed(message: message)
+        }
 
         // Step 3 — Schedule the DeviceActivity backup monitor. If this fails,
-        // roll back: clear peek state and re-block so the user isn't left with
-        // an unguarded unlock window.
+        // roll back immediately so the pass never leaves the device unguarded
+        // when the app backgrounds or is terminated.
         do {
             try timeUnlockScheduler.schedulePeekEnd(at: expiration)
         } catch {
-            Self.logger.error("Failed to schedule peek-end DeviceActivity monitor.")
-            SharedStorage.clearPeek()
-            do {
-                try await blockerService.updateShields(shouldBlock: true)
-            } catch {
-                Self.logger.error("Failed to roll back shields after peek scheduling failure.")
-            }
-            shieldWarning = String(localized: "Couldn't start Mindful Peek — please try again.")
-            return
+            Self.logger.error(
+                "Failed to schedule peek-end DeviceActivity monitor: \(error.localizedDescription)"
+            )
+            let message = String(
+                localized: "Couldn't start Daily 3-Minute Pass — please try again.")
+            await rollbackFailedPeekActivation()
+            return .failed(message: message)
         }
 
         // Step 4 — Update observable UI state and start the foreground timer.
         isPeekActive = true
         peekTimeRemaining = max(0, expiration.timeIntervalSinceNow)
         startPeekCountdownTimer()
+        return .activated
     }
 
     /// Expires the active peek, re-applies shields, and cleans up timers.
@@ -871,6 +920,22 @@ final class DashboardViewModel: GoalStatusProvider {
         }
     }
 
+    /// Clears any partial peek activation and restores shields.
+    private func rollbackFailedPeekActivation() async {
+        peekTimerTask?.cancel()
+        peekTimerTask = nil
+        SharedStorage.clearPeek()
+        isPeekActive = false
+        peekTimeRemaining = 0
+        timeUnlockScheduler.cancelPeekEnd()
+
+        do {
+            try await blockerService.updateShields(shouldBlock: true)
+        } catch {
+            Self.logger.error("Failed to roll back shields after peek activation failure.")
+        }
+    }
+
     /// Returns whether easier goal edits should be deferred behind the pending-change flow.
     ///
     /// **Why use cached snapshot?** The evaluation snapshot is at most seconds old after
@@ -931,6 +996,20 @@ final class DashboardViewModel: GoalStatusProvider {
         currentExerciseMinutes = result.exerciseMinutesByGoalId
         isBlocking = result.shouldBlock
         shieldWarning = nil
+    }
+
+    /// Reconstructs the best available blocking state after a sync failure.
+    private func applyLatestAvailableBlockingState() {
+        if let snapshot = SharedStorage.lastEvaluationSnapshot,
+            snapshot.isFreshForCurrentDay()
+        {
+            applyEvaluationResult(snapshot)
+        } else {
+            isBlocking = GoalBlockingEvaluator.shouldBlock(
+                goal: healthGoal,
+                snapshot: goalEvaluationSnapshot()
+            )
+        }
     }
 
     /// Runs a sync via the background monitor and applies the result to UI state.
