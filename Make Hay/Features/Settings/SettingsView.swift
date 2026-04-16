@@ -98,15 +98,10 @@ struct SettingsView: View {
                     Text(errorMessage)
                 }
             }
-            .confirmationDialog(
-                String(localized: "Activate your only 3-Minute Pass for today?"),
-                isPresented: $isShowingPeekConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button(String(localized: "Activate Pass"), role: .destructive) {
+            .sheet(isPresented: $isShowingPeekConfirmation) {
+                GuardrailInterceptionView(context: .peekRequest) {
                     Task { await activateDailyPass() }
                 }
-                Button(String(localized: "Cancel"), role: .cancel) {}
             }
             .alert(
                 String(localized: "Enable Health Access"),
@@ -408,7 +403,6 @@ struct SettingsView: View {
     private var shouldShowDailyPassControls: Bool {
         dashboardViewModel.isPeekActive
             || dashboardViewModel.isPeekAvailable
-            || dashboardViewModel.isPeekUsedToday
     }
 
     @ViewBuilder
@@ -419,7 +413,7 @@ struct SettingsView: View {
                     .foregroundStyle(Color.statusWarning)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(String(localized: "Daily 3-Minute Pass Active"))
+                    Text(String(localized: "Pass Active"))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
@@ -441,9 +435,12 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(String(localized: "Daily 3-Minute Pass"))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                        Text(
+                            String(
+                                localized: "\(SharedStorage.nextPeekDurationMinutes)-Minute Pass")
+                        )
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
 
                         Text(String(localized: "Keep this as a last-resort check-in."))
                             .font(.caption)
@@ -460,26 +457,8 @@ struct SettingsView: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("peekActivationButton")
-            .accessibilityLabel(String(localized: "Use Daily 3-Minute Pass"))
-        } else if dashboardViewModel.isPeekUsedToday {
-            HStack(spacing: 12) {
-                Image(systemName: "checkmark.circle")
-                    .foregroundStyle(.tertiary)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(String(localized: "Daily 3-Minute Pass Used"))
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-
-                    Text(String(localized: "It resets tomorrow."))
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-
-                Spacer()
-            }
-            .frame(minHeight: 44)
-            .accessibilityIdentifier("peekUsedIndicator")
+            .accessibilityLabel(
+                String(localized: "Use \(SharedStorage.nextPeekDurationMinutes)-Minute Pass"))
         }
     }
 

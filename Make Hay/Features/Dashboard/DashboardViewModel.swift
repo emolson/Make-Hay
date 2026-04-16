@@ -146,15 +146,10 @@ final class DashboardViewModel: GoalStatusProvider {
 
     /// Whether the user can activate a Mindful Peek right now.
     ///
-    /// Requirements: currently blocked and peek hasn't been used today.
-    /// `isBlocking` already implies at least one enabled goal is active.
+    /// Requirements: currently blocked and no peek already active.
+    /// Peeks are always available while blocked (with diminishing durations).
     var isPeekAvailable: Bool {
-        isBlocking && !isPeekActive && SharedStorage.isPeekAvailableToday
-    }
-
-    /// Whether the user already used their daily peek (but it's no longer active).
-    var isPeekUsedToday: Bool {
-        !SharedStorage.isPeekAvailableToday && !isPeekActive
+        isBlocking && !isPeekActive
     }
 
     /// The last day number the app checked for steps.
@@ -787,11 +782,11 @@ final class DashboardViewModel: GoalStatusProvider {
         case failed(message: String)
     }
 
-    /// Activates the daily Mindful Peek: lifts shields for 3 minutes and starts
-    /// a foreground countdown timer.
+    /// Activates a Mindful Peek with a tiered duration (3 min → 2 min → 1 min)
+    /// and starts a foreground countdown timer.
     ///
     /// **Transactional:** Shields are lifted first. If that fails, SharedStorage is
-    /// never written so the daily peek is not consumed. If the backup DeviceActivity
+    /// never written so the peek is not consumed. If the backup DeviceActivity
     /// monitor can't be scheduled, we roll back the unblock so the user isn't left
     /// with no hard cutoff.
     @discardableResult
@@ -806,11 +801,11 @@ final class DashboardViewModel: GoalStatusProvider {
             return .failed(message: error.localizedDescription)
         }
 
-        // Step 2 — Commit peek state to SharedStorage (now the daily peek is used).
+        // Step 2 — Commit peek state to SharedStorage (now the peek is used).
         SharedStorage.activatePeek()
         guard let expiration = SharedStorage.peekExpirationDate else {
             let message = String(
-                localized: "Couldn't start Daily 3-Minute Pass — please try again.")
+                localized: "Couldn't start pass — please try again.")
             await rollbackFailedPeekActivation()
             return .failed(message: message)
         }
@@ -825,7 +820,7 @@ final class DashboardViewModel: GoalStatusProvider {
                 "Failed to schedule peek-end DeviceActivity monitor: \(error.localizedDescription)"
             )
             let message = String(
-                localized: "Couldn't start Daily 3-Minute Pass — please try again.")
+                localized: "Couldn't start pass — please try again.")
             await rollbackFailedPeekActivation()
             return .failed(message: message)
         }

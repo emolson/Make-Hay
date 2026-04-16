@@ -17,10 +17,10 @@ import UIKit
 struct GuardrailInterceptionView: View {
 
     /// Duration (seconds) the user must continuously hold to pass the active-pause phase.
-    /// Peek uses a shorter hold (10s) since it doesn't permanently alter goals.
+    /// Peek uses a longer hold (20s) since it still only temporarily unlocks access.
     private var holdDuration: TimeInterval {
         switch context {
-        case .peekRequest: return 10
+        case .peekRequest: return 20
         default: return 15
         }
     }
@@ -253,7 +253,7 @@ struct GuardrailInterceptionView: View {
 
             SlideToForfeitControl(
                 label: context == .peekRequest
-                    ? String(localized: "Slide to Activate Peek")
+                    ? String(localized: "Slide to Activate Pass")
                     : String(localized: "Slide to Forfeit and Unlock")
             ) {
                 onEmergencyUnlock()
@@ -314,9 +314,10 @@ struct GuardrailInterceptionView: View {
 
     private var lossAversionWarningMessage: String {
         if context == .peekRequest {
+            let minutes = SharedStorage.nextPeekDurationMinutes
             return String(
                 localized:
-                    "Using your daily peek won't reset your progress, but your apps will re-lock in 3 minutes."
+                    "This won't reset your progress, but your apps will re-lock in \(minutes) minutes."
             )
         }
         guard closestUnmetGoal != nil else {
@@ -390,7 +391,13 @@ struct GuardrailInterceptionView: View {
                 }
             }
 
-            try? await Task.sleep(for: .milliseconds(33))
+            do {
+                try await Task.sleep(for: .milliseconds(33))
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
         }
     }
 }
@@ -474,13 +481,34 @@ private struct SlideToForfeitControl: View {
 // MARK: - Preview
 
 #Preview("Goal Change") {
+    let previewViewModel = makeGuardrailInterceptionPreviewViewModel()
     GuardrailInterceptionView(context: .goalChange) {}
+        .environment(\.dashboardViewModel, previewViewModel)
 }
 
 #Preview("Blocked Apps Change") {
+    let previewViewModel = makeGuardrailInterceptionPreviewViewModel()
     GuardrailInterceptionView(context: .blockedAppsChange) {}
+        .environment(\.dashboardViewModel, previewViewModel)
 }
 
 #Preview("Peek Request") {
+    let previewViewModel = makeGuardrailInterceptionPreviewViewModel()
     GuardrailInterceptionView(context: .peekRequest) {}
+        .environment(\.dashboardViewModel, previewViewModel)
+}
+
+@MainActor
+private func makeGuardrailInterceptionPreviewViewModel() -> DashboardViewModel {
+    let previewViewModel = DashboardViewModel(
+        healthService: MockHealthService(steps: 4_200, activeEnergy: 180, exerciseMinutes: 10),
+        blockerService: MockBlockerService(),
+        backgroundHealthMonitor: MockBackgroundHealthMonitor(),
+        timeUnlockScheduler: MockTimeUnlockScheduler()
+    )
+    previewViewModel.healthGoal = HealthGoal(
+        stepGoal: .init(isEnabled: true, target: 8_000, schedule: .everyDay)
+    )
+    previewViewModel.currentSteps = 4_200
+    return previewViewModel
 }

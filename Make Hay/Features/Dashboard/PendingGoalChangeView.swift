@@ -27,7 +27,8 @@ enum PendingChangeContext: Sendable {
     var interceptionNavigationTitle: String {
         switch self {
         case .peekRequest:
-            return String(localized: "Use Your Daily Peek?")
+            let minutes = SharedStorage.nextPeekDurationMinutes
+            return String(localized: "Use \(minutes)-Minute Pass?")
         default:
             return String(localized: "Hold On")
         }
@@ -45,9 +46,10 @@ enum PendingChangeContext: Sendable {
     var message: String {
         switch self {
         case .peekRequest:
+            let minutes = SharedStorage.nextPeekDurationMinutes
             return String(
                 localized:
-                    "You'll have 3 minutes of unrestricted access. This is your only peek today — make it count."
+                    "You'll have \(minutes) minutes of unrestricted access. Your apps will re-lock automatically."
             )
         default:
             return String(
@@ -70,9 +72,10 @@ enum PendingChangeContext: Sendable {
                     "Emergency unlock applies your blocked-app changes immediately, even before goals are met."
             )
         case .peekRequest:
+            let minutes = SharedStorage.nextPeekDurationMinutes
             return String(
                 localized:
-                    "This is your only peek today. Your apps will re-lock automatically in 3 minutes."
+                    "Your apps will re-lock automatically in \(minutes) minutes."
             )
         }
     }

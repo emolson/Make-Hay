@@ -147,15 +147,6 @@ struct DashboardView: View {
 
     private var goalsView: some View {
         List {
-            // Peek Countdown Banner — shown at the very top while a
-            // Mindful Peek is active so the timer is always visible.
-            if viewModel.isPeekActive {
-                peekCountdownBanner
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets())
-            }
-
             // Permissions Banner — shown prominently above all other content
             // when HealthKit or Screen Time access has been revoked.
             if permissionManager.isPermissionMissing {
@@ -480,32 +471,6 @@ struct DashboardView: View {
         )
     }
 
-    /// Countdown banner displayed while a Mindful Peek is active.
-    /// Shows remaining time so the user can gauge urgency at a glance.
-    private var peekCountdownBanner: some View {
-        let minutes = Int(viewModel.peekTimeRemaining) / 60
-        let seconds = Int(viewModel.peekTimeRemaining) % 60
-        let formatted = String(format: "%d:%02d", minutes, seconds)
-
-        return HStack(spacing: 10) {
-            Image(systemName: "timer")
-                .foregroundStyle(Color.statusWarning)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(String(localized: "Apps unblocked for \(formatted)"))
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                Text(String(localized: "Get in, get out."))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
-        .padding()
-        .background(Color.statusWarning.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal, 16)
-        .accessibilityIdentifier("peekCountdownBanner")
-    }
-
     private var errorView: some View {
         VStack(spacing: 20) {
             Image(systemName: "exclamationmark.triangle.fill")
@@ -572,15 +537,6 @@ struct DashboardView: View {
             DashboardViewModel(
                 healthService: ErrorThrowingMockHealthService(),
                 blockerService: MockBlockerService()))
-}
-
-#Preview("Peek Active") {
-    let vm = DashboardViewModel(
-        healthService: MockHealthService(), blockerService: MockBlockerService())
-    vm.isPeekActive = true
-    vm.peekTimeRemaining = 142
-    return DashboardView()
-        .environment(\.dashboardViewModel, vm)
 }
 
 // MARK: - Preview Helper

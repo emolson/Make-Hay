@@ -32,7 +32,7 @@ struct Make_HayTests {
         #expect(viewModel.isPeekActive == false)
         #expect(viewModel.peekTimeRemaining == 0)
         #expect(SharedStorage.peekExpirationDate == nil)
-        #expect(SharedStorage.isPeekAvailableToday)
+        #expect(SharedStorage.peekUsageCountToday == 0)
         #expect(await blockerService.getIsBlocking())
     }
 

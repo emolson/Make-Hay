@@ -256,14 +256,29 @@ enum SharedStorage {
     /// update both together if the key string ever needs to change.
     nonisolated static let peekExpirationDateKey = "peekExpirationDate"
 
-    /// Key for the `Date` when the user activated their daily peek.
-    /// Persisted separately from `peekExpirationDate` so the daily-limit check
-    /// survives peek expiration (which nils the expiration date but must leave the
-    /// activated flag for the remainder of the calendar day).
+    /// Key for the `Date` when the user last activated a peek.
+    /// Used alongside the usage count to detect day rollovers.
     private nonisolated static let peekActivatedDateKey = "peekActivatedDate"
 
-    /// Duration of a Mindful Peek in seconds.
-    nonisolated static let peekDurationSeconds: TimeInterval = 180
+    /// Key for the number of peeks used today.
+    private nonisolated static let peekUsageCountKey = "peekUsageCountToday"
+
+    /// Tiered peek durations in seconds: 3 min → 2 min → 1 min for all subsequent.
+    private nonisolated static let peekDurations: [TimeInterval] = [180, 120, 60]
+
+    /// Returns the peek duration for the next activation based on today's usage count.
+    nonisolated static var nextPeekDurationSeconds: TimeInterval {
+        let count = peekUsageCountToday
+        if count < peekDurations.count {
+            return peekDurations[count]
+        }
+        return peekDurations.last!
+    }
+
+    /// Returns the peek duration in whole minutes for the next activation.
+    nonisolated static var nextPeekDurationMinutes: Int {
+        Int(nextPeekDurationSeconds) / 60
+    }
 
     /// When the currently active peek expires, or `nil` if no peek is active.
     nonisolated static var peekExpirationDate: Date? {
@@ -280,7 +295,7 @@ enum SharedStorage {
         }
     }
 
-    /// When the user activated their daily peek, or `nil` if unused today.
+    /// When the user last activated a peek, or `nil` if unused today.
     nonisolated static var peekActivatedDate: Date? {
         get {
             let interval = appGroupDefaults.double(forKey: peekActivatedDateKey)
@@ -295,40 +310,48 @@ enum SharedStorage {
         }
     }
 
+    /// Number of peeks the user has activated today.
+    nonisolated static var peekUsageCountToday: Int {
+        get {
+            guard let activated = peekActivatedDate,
+                Calendar.current.isDateInToday(activated)
+            else { return 0 }
+            return appGroupDefaults.integer(forKey: peekUsageCountKey)
+        }
+        set {
+            appGroupDefaults.set(newValue, forKey: peekUsageCountKey)
+        }
+    }
+
     /// Whether a Mindful Peek is currently active (shields are temporarily lifted).
     nonisolated static var isPeekActive: Bool {
         guard let expiration = peekExpirationDate else { return false }
         return Date() < expiration
     }
 
-    /// Whether the user's daily peek is still available (not yet used today).
-    nonisolated static var isPeekAvailableToday: Bool {
-        guard let activated = peekActivatedDate else { return true }
-        return !Calendar.current.isDateInToday(activated)
-    }
-
-    /// Activates the daily Mindful Peek, recording the activation time and
-    /// setting the expiration date.
-    /// - Parameter duration: How long the peek lasts (defaults to `peekDurationSeconds`).
-    nonisolated static func activatePeek(duration: TimeInterval = peekDurationSeconds) {
+    /// Activates a Mindful Peek with a tiered duration based on today's usage count.
+    nonisolated static func activatePeek() {
         let now = Date()
+        let duration = nextPeekDurationSeconds
         peekActivatedDate = now
+        peekUsageCountToday += 1
         peekExpirationDate = now.addingTimeInterval(duration)
     }
 
-    /// Expires an active peek without resetting the daily-limit flag.
+    /// Expires an active peek without resetting the usage count.
     ///
     /// **Why separate from `clearPeek()`?** When the timer runs out, we nil the
-    /// expiration so `isPeekActive` returns false, but leave `peekActivatedDate` intact
-    /// so the user cannot activate a second peek the same day.
+    /// expiration so `isPeekActive` returns false, but leave the usage count intact
+    /// so subsequent peeks use the correct tiered duration.
     nonisolated static func expirePeek() {
         peekExpirationDate = nil
     }
 
     /// Resets all peek state for a new calendar day.
-    /// Called during midnight rollover so the user gets a fresh daily peek.
+    /// Called during midnight rollover so the user gets fresh tiered peeks.
     nonisolated static func clearPeek() {
         peekExpirationDate = nil
         peekActivatedDate = nil
+        peekUsageCountToday = 0
     }
 }
