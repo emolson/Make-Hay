@@ -10,11 +10,16 @@ import Testing
 
 @testable import Make_Hay
 
+@Suite(.serialized)
 struct Make_HayTests {
 
     @Test @MainActor func activatePeekFailsClosedWhenBackupMonitorSchedulingFails() async throws {
         SharedStorage.clearPeek()
-        defer { SharedStorage.clearPeek() }
+        SharedStorage.resetPeekRestoreDiagnostics()
+        defer {
+            SharedStorage.clearPeek()
+            SharedStorage.resetPeekRestoreDiagnostics()
+        }
 
         let blockerService = MockBlockerService()
         let viewModel = DashboardViewModel(
@@ -38,7 +43,11 @@ struct Make_HayTests {
 
     @Test @MainActor func activatePeekClearsStaleWarningOnSuccess() async throws {
         SharedStorage.clearPeek()
-        defer { SharedStorage.clearPeek() }
+        SharedStorage.resetPeekRestoreDiagnostics()
+        defer {
+            SharedStorage.clearPeek()
+            SharedStorage.resetPeekRestoreDiagnostics()
+        }
 
         let blockerService = MockBlockerService()
         let scheduler = MockTimeUnlockScheduler()
@@ -64,7 +73,11 @@ struct Make_HayTests {
         async throws
     {
         SharedStorage.clearPeek()
-        defer { SharedStorage.clearPeek() }
+        SharedStorage.resetPeekRestoreDiagnostics()
+        defer {
+            SharedStorage.clearPeek()
+            SharedStorage.resetPeekRestoreDiagnostics()
+        }
 
         let monitor = MockBackgroundHealthMonitor()
         await monitor.setStubbedResult(
@@ -90,6 +103,79 @@ struct Make_HayTests {
         #expect(viewModel.isLoading == false)
         #expect(viewModel.errorMessage == "Existing dashboard error")
         #expect(await monitor.syncNowCallCount == 1)
+    }
+
+    @Test @MainActor func expirePeekFailsClosedWhenSyncThrows() async throws {
+        SharedStorage.clearPeek()
+        SharedStorage.resetPeekRestoreDiagnostics()
+        defer {
+            SharedStorage.clearPeek()
+            SharedStorage.resetPeekRestoreDiagnostics()
+        }
+
+        let blockerService = MockBlockerService()
+        let monitor = MockBackgroundHealthMonitor()
+        await monitor.setShouldThrowOnSync(true)
+        let scheduler = MockTimeUnlockScheduler()
+        let viewModel = DashboardViewModel(
+            healthService: MockHealthService(),
+            blockerService: blockerService,
+            backgroundHealthMonitor: monitor,
+            timeUnlockScheduler: scheduler
+        )
+
+        let result = await viewModel.activatePeek()
+        #expect(result == .activated)
+
+        await viewModel.expirePeek()
+
+        #expect(viewModel.isPeekActive == false)
+        #expect(await blockerService.getIsBlocking())
+        #expect(scheduler.cancelPeekEndCallCount == 0)
+        #expect(SharedStorage.lastPeekRestoreSource == .appFallback)
+        #expect(SharedStorage.lastPeekRestoreOutcome == .applied)
+    }
+
+    @Test @MainActor func peekTimerExpiryDoesNotCancelItsOwnSync() async throws {
+        SharedStorage.clearPeek()
+        SharedStorage.resetPeekRestoreDiagnostics()
+        defer {
+            SharedStorage.clearPeek()
+            SharedStorage.resetPeekRestoreDiagnostics()
+        }
+
+        let blockerService = MockBlockerService()
+        let monitor = MockBackgroundHealthMonitor()
+        await monitor.setShouldRespectTaskCancellationDuringSync(true)
+        await monitor.setStubbedResult(
+            EvaluationResult(
+                steps: 0,
+                activeEnergy: 0,
+                exerciseMinutesByGoalId: [:],
+                shouldBlock: true,
+                timestamp: Date()
+            )
+        )
+        let scheduler = MockTimeUnlockScheduler()
+        let viewModel = DashboardViewModel(
+            healthService: MockHealthService(),
+            blockerService: blockerService,
+            backgroundHealthMonitor: monitor,
+            timeUnlockScheduler: scheduler
+        )
+
+        let result = await viewModel.activatePeek()
+        #expect(result == .activated)
+
+        SharedStorage.peekExpirationDate = Date().addingTimeInterval(-1)
+        try await Task.sleep(for: .seconds(2))
+
+        #expect(viewModel.isPeekActive == false)
+        #expect(await blockerService.getIsBlocking())
+        #expect(await monitor.syncNowCallCount == 1)
+        #expect(scheduler.cancelPeekEndCallCount == 1)
+        #expect(SharedStorage.lastPeekRestoreSource == .healthSync)
+        #expect(SharedStorage.lastPeekRestoreOutcome == .applied)
     }
 
 }

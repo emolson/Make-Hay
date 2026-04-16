@@ -792,6 +792,7 @@ final class DashboardViewModel: GoalStatusProvider {
     @discardableResult
     func activatePeek() async -> PeekActivationResult {
         shieldWarning = nil
+        SharedStorage.resetPeekRestoreDiagnostics()
 
         // Step 1 — Lift shields. If this fails the daily peek is NOT consumed.
         do {
@@ -838,23 +839,7 @@ final class DashboardViewModel: GoalStatusProvider {
     /// the in-process re-evaluation succeeds. If `syncNow()` throws, the extension
     /// callback is the remaining safety net that will re-shield.
     func expirePeek() async {
-        peekTimerTask?.cancel()
-        peekTimerTask = nil
-
-        SharedStorage.expirePeek()
-        isPeekActive = false
-        peekTimeRemaining = 0
-
-        // Re-evaluate and re-block. Only disarm the backup after success.
-        do {
-            let result = try await backgroundHealthMonitor.syncNow(reason: "dashboard.peekExpired")
-            applyEvaluationResult(result)
-            timeUnlockScheduler.cancelPeekEnd()
-        } catch {
-            Self.logger.error("Failed to re-evaluate after Mindful Peek expired.")
-            shieldWarning = error.localizedDescription
-            // Keep the backup monitor armed so the extension still enforces the cutoff.
-        }
+        await expirePeek(cancellingTimer: true)
     }
 
     /// Checks SharedStorage for an in-flight peek on app foreground and resumes or
@@ -898,13 +883,15 @@ final class DashboardViewModel: GoalStatusProvider {
 
                     guard let expiration = SharedStorage.peekExpirationDate else {
                         // Peek was expired externally (extension or another process).
-                        await self.expirePeek()
+                        self.peekTimerTask = nil
+                        await self.expirePeek(cancellingTimer: false)
                         return
                     }
 
                     let remaining = expiration.timeIntervalSinceNow
                     if remaining <= 0 {
-                        await self.expirePeek()
+                        self.peekTimerTask = nil
+                        await self.expirePeek(cancellingTimer: false)
                         return
                     }
                     self.peekTimeRemaining = remaining
@@ -928,6 +915,104 @@ final class DashboardViewModel: GoalStatusProvider {
             try await blockerService.updateShields(shouldBlock: true)
         } catch {
             Self.logger.error("Failed to roll back shields after peek activation failure.")
+        }
+    }
+
+    /// Expires the current peek and immediately restores shields before any slower
+    /// health re-evaluation. This keeps expiry fail-closed even if the sync is later
+    /// cancelled or the app moves to the background.
+    private func expirePeek(cancellingTimer: Bool) async {
+        if cancellingTimer {
+            peekTimerTask?.cancel()
+        }
+        peekTimerTask = nil
+
+        SharedStorage.expirePeek()
+        isPeekActive = false
+        peekTimeRemaining = 0
+
+        let fallbackApplied = await reapplyPeekShieldsFallback()
+
+        do {
+            let result = try await backgroundHealthMonitor.syncNow(reason: "dashboard.peekExpired")
+            applyEvaluationResult(result)
+            SharedStorage.recordPeekRestoreEvent(
+                source: .healthSync,
+                outcome: result.shouldBlock ? .applied : .cleared
+            )
+            timeUnlockScheduler.cancelPeekEnd()
+            shieldWarning = nil
+        } catch is CancellationError {
+            if !fallbackApplied {
+                SharedStorage.recordPeekRestoreEvent(
+                    source: .healthSync,
+                    outcome: .failed,
+                    failure: .syncCancelled
+                )
+                Self.logger.error("Peek expiry sync cancelled before shields were restored.")
+                shieldWarning = String(
+                    localized: "Couldn't verify your block status after the pass expired."
+                )
+            }
+            // If the local fallback already re-applied shields, keep the backup monitor
+            // armed and avoid surfacing a noisy warning for a safe cancellation.
+        } catch {
+            if !fallbackApplied {
+                SharedStorage.recordPeekRestoreEvent(
+                    source: .healthSync,
+                    outcome: .failed,
+                    failure: Self.peekSyncFailureReason(for: error)
+                )
+                Self.logger.error("Failed to re-evaluate after Mindful Peek expired.")
+                shieldWarning = error.localizedDescription
+            }
+            // Keep the backup monitor armed so the extension still enforces the cutoff.
+        }
+    }
+
+    /// Applies shields immediately when a peek expires so the app fails closed before
+    /// any slower health reconciliation decides whether to unblock again.
+    private func reapplyPeekShieldsFallback() async -> Bool {
+        do {
+            try await blockerService.updateShields(shouldBlock: true)
+            isBlocking = true
+            SharedStorage.recordPeekRestoreEvent(source: .appFallback, outcome: .applied)
+            return true
+        } catch {
+            SharedStorage.recordPeekRestoreEvent(
+                source: .appFallback,
+                outcome: .failed,
+                failure: Self.peekShieldFailureReason(for: error)
+            )
+            return false
+        }
+    }
+
+    private nonisolated static func peekShieldFailureReason(
+        for error: Error
+    ) -> SharedStorage.PeekRestoreFailureReason {
+        switch error {
+        case BlockerServiceError.authorizationFailed, BlockerServiceError.notAuthorized:
+            return .notAuthorized
+        case BlockerServiceError.configurationUpdateFailed:
+            return .shieldUpdateFailed
+        default:
+            return .unknown
+        }
+    }
+
+    private nonisolated static func peekSyncFailureReason(
+        for error: Error
+    ) -> SharedStorage.PeekRestoreFailureReason {
+        switch error {
+        case is CancellationError:
+            return .syncCancelled
+        case BlockerServiceError.authorizationFailed, BlockerServiceError.notAuthorized:
+            return .notAuthorized
+        case BlockerServiceError.configurationUpdateFailed:
+            return .shieldUpdateFailed
+        default:
+            return .syncFailed
         }
     }
 

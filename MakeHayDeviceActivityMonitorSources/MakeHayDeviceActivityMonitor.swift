@@ -63,6 +63,14 @@ private struct GoalScheduleInfo: Decodable {
     }
 }
 
+/// Result of loading the persisted blocked-app selection from the App Group container.
+private enum PersistedSelectionLoadResult {
+    case loaded(FamilyActivitySelection)
+    case missing
+    case decodeFailed
+    case appGroupUnavailable
+}
+
 /// Device Activity monitor that performs background-resilient time unlock actions.
 ///
 /// **Isolation:** DeviceActivity delivers callbacks on arbitrary background threads.
@@ -176,19 +184,18 @@ final class MakeHayDeviceActivityMonitor: DeviceActivityMonitor {
             }
         }
 
-        guard let selection = Self.loadPersistedSelection() else {
+        switch Self.loadPersistedSelection() {
+        case .loaded(let selection):
+            applyShields(from: selection)
+        case .missing:
             Self.logger.warning("No persisted app selection found — cannot re-shield.")
             return
-        }
-
-        if !selection.applicationTokens.isEmpty {
-            store.shield.applications = selection.applicationTokens
-        }
-        if !selection.categoryTokens.isEmpty {
-            store.shield.applicationCategories = ShieldSettings.ActivityCategoryPolicy.specific(
-                selection.categoryTokens,
-                except: Set()
-            )
+        case .decodeFailed:
+            Self.logger.error("Failed to decode persisted blocked-app selection.")
+            return
+        case .appGroupUnavailable:
+            Self.logger.error("App Group container URL unavailable in extension.")
+            return
         }
 
         Self.logger.info("Shields re-applied after time unlock interval ended.")
@@ -213,24 +220,72 @@ final class MakeHayDeviceActivityMonitor: DeviceActivityMonitor {
         }
         defaults.removeObject(forKey: peekExpirationDateKey)
 
-        guard let selection = Self.loadPersistedSelection() else {
+        switch Self.loadPersistedSelection() {
+        case .loaded(let selection):
+            applyShields(from: selection)
+            Self.recordPeekRestore(defaults: defaults, outcome: "applied")
+        case .missing:
+            Self.recordPeekRestore(
+                defaults: defaults,
+                outcome: "failed",
+                failure: "selectionMissing"
+            )
             Self.logger.warning(
                 "No persisted app selection — cannot re-shield after peek. Next evaluation will re-block."
             )
             return
-        }
-
-        if !selection.applicationTokens.isEmpty {
-            store.shield.applications = selection.applicationTokens
-        }
-        if !selection.categoryTokens.isEmpty {
-            store.shield.applicationCategories = ShieldSettings.ActivityCategoryPolicy.specific(
-                selection.categoryTokens,
-                except: Set()
+        case .decodeFailed:
+            Self.recordPeekRestore(
+                defaults: defaults,
+                outcome: "failed",
+                failure: "selectionDecodeFailed"
             )
+            Self.logger.error("Failed to decode persisted blocked-app selection.")
+            return
+        case .appGroupUnavailable:
+            Self.recordPeekRestore(
+                defaults: defaults,
+                outcome: "failed",
+                failure: "appGroupUnavailable"
+            )
+            Self.logger.error("App Group container URL unavailable in extension.")
+            return
         }
 
         Self.logger.info("Shields re-applied after Mindful Peek expired.")
+    }
+
+    /// Applies the persisted block selection to the shared ManagedSettings store.
+    /// Empty app or category sets explicitly clear that dimension so stale shields
+    /// from older selections cannot linger.
+    nonisolated private func applyShields(from selection: FamilyActivitySelection) {
+        store.shield.applications =
+            selection.applicationTokens.isEmpty
+            ? nil
+            : selection.applicationTokens
+        store.shield.applicationCategories =
+            selection.categoryTokens.isEmpty
+            ? nil
+            : ShieldSettings.ActivityCategoryPolicy.specific(
+                selection.categoryTokens,
+                except: Set()
+            )
+    }
+
+    /// Records the latest coarse peek-expiry enforcement event for the app to inspect.
+    nonisolated private static func recordPeekRestore(
+        defaults: UserDefaults,
+        outcome: String,
+        failure: String? = nil
+    ) {
+        defaults.set(Date().timeIntervalSince1970, forKey: peekRestoreEventDateKey)
+        defaults.set("extension", forKey: peekRestoreSourceKey)
+        defaults.set(outcome, forKey: peekRestoreOutcomeKey)
+        if let failure {
+            defaults.set(failure, forKey: peekRestoreFailureKey)
+        } else {
+            defaults.removeObject(forKey: peekRestoreFailureKey)
+        }
     }
 
     /// Reads the time-block goal info from App Group UserDefaults.
@@ -266,30 +321,28 @@ final class MakeHayDeviceActivityMonitor: DeviceActivityMonitor {
     /// **Why load from disk?** The extension runs in a separate process and cannot access
     /// `BlockerService`'s in-memory selection. The main app persists the selection as a
     /// PropertyList file in the shared App Group container, which the extension reads here.
-    nonisolated private static func loadPersistedSelection() -> FamilyActivitySelection? {
+    nonisolated private static func loadPersistedSelection() -> PersistedSelectionLoadResult {
         guard
             let containerURL = FileManager.default.containerURL(
                 forSecurityApplicationGroupIdentifier: "group.ethanolson.Make-Hay"
             )
         else {
-            logger.error("App Group container URL unavailable in extension.")
-            return nil
+            return .appGroupUnavailable
         }
 
         let selectionURL = containerURL.appendingPathComponent("FamilyActivitySelection.plist")
 
         guard FileManager.default.fileExists(atPath: selectionURL.path) else {
-            logger.warning("Persisted blocked-app selection not found.")
-            return nil
+            return .missing
         }
 
         do {
             let data = try Data(contentsOf: selectionURL)
-            return try PropertyListDecoder().decode(FamilyActivitySelection.self, from: data)
+            let selection = try PropertyListDecoder().decode(
+                FamilyActivitySelection.self, from: data)
+            return .loaded(selection)
         } catch {
-            let _ = error
-            logger.error("Failed to decode persisted blocked-app selection.")
-            return nil
+            return .decodeFailed
         }
     }
 }

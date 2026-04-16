@@ -130,6 +130,35 @@ enum SharedStorage {
         case backgroundRefresh = "backgroundRefresh"
     }
 
+    /// Sources that can restore shields when a Mindful Peek expires.
+    enum PeekRestoreSource: String, Sendable {
+        case scheduler = "scheduler"
+        case appFallback = "appFallback"
+        case deviceActivityExtension = "extension"
+        case healthSync = "healthSync"
+    }
+
+    /// Coarse outcomes for the most recent peek-expiry enforcement event.
+    enum PeekRestoreOutcome: String, Sendable {
+        case scheduled = "scheduled"
+        case applied = "applied"
+        case cleared = "cleared"
+        case failed = "failed"
+    }
+
+    /// Stable failure codes for the peek-expiry restore path.
+    enum PeekRestoreFailureReason: String, Sendable {
+        case scheduleRejected = "scheduleRejected"
+        case appGroupUnavailable = "appGroupUnavailable"
+        case selectionMissing = "selectionMissing"
+        case selectionDecodeFailed = "selectionDecodeFailed"
+        case notAuthorized = "notAuthorized"
+        case shieldUpdateFailed = "shieldUpdateFailed"
+        case syncCancelled = "syncCancelled"
+        case syncFailed = "syncFailed"
+        case unknown = "unknown"
+    }
+
     /// How long since the last successful evaluation before the data is considered
     /// stale enough to justify a forced foreground sync.
     ///
@@ -256,6 +285,29 @@ enum SharedStorage {
     /// update both together if the key string ever needs to change.
     nonisolated static let peekExpirationDateKey = "peekExpirationDate"
 
+    /// Key for the original expiration `Date` the app intended for the current peek.
+    /// Preserved after expiry so the app can diagnose scheduler drift.
+    nonisolated static let peekExpectedExpirationDateKey = "peekExpectedExpirationDate"
+
+    /// Key for the rounded-up minute when the DeviceActivity monitor should fire.
+    nonisolated static let peekMonitorScheduledFireDateKey = "peekMonitorScheduledFireDate"
+
+    /// Key for the end of the one-shot DeviceActivity interval.
+    nonisolated static let peekMonitorScheduledIntervalEndDateKey =
+        "peekMonitorScheduledIntervalEndDate"
+
+    /// Key for the timestamp of the last peek-expiry enforcement event.
+    nonisolated static let peekRestoreEventDateKey = "peekRestoreEventDate"
+
+    /// Key for the source of the last peek-expiry enforcement event.
+    nonisolated static let peekRestoreSourceKey = "peekRestoreSource"
+
+    /// Key for the outcome of the last peek-expiry enforcement event.
+    nonisolated static let peekRestoreOutcomeKey = "peekRestoreOutcome"
+
+    /// Key for the coarse failure reason of the last peek-expiry enforcement event.
+    nonisolated static let peekRestoreFailureKey = "peekRestoreFailure"
+
     /// Key for the `Date` when the user last activated a peek.
     /// Used alongside the usage count to detect day rollovers.
     private nonisolated static let peekActivatedDateKey = "peekActivatedDate"
@@ -291,6 +343,122 @@ enum SharedStorage {
                 appGroupDefaults.set(date.timeIntervalSince1970, forKey: peekExpirationDateKey)
             } else {
                 appGroupDefaults.removeObject(forKey: peekExpirationDateKey)
+            }
+        }
+    }
+
+    /// The app's intended expiration date for the current or most recent peek.
+    nonisolated static var peekExpectedExpirationDate: Date? {
+        get {
+            let interval = appGroupDefaults.double(forKey: peekExpectedExpirationDateKey)
+            return interval > 0 ? Date(timeIntervalSince1970: interval) : nil
+        }
+        set {
+            if let date = newValue {
+                appGroupDefaults.set(
+                    date.timeIntervalSince1970, forKey: peekExpectedExpirationDateKey)
+            } else {
+                appGroupDefaults.removeObject(forKey: peekExpectedExpirationDateKey)
+            }
+        }
+    }
+
+    /// The rounded-up DeviceActivity start date for the current or most recent peek.
+    nonisolated static var peekMonitorScheduledFireDate: Date? {
+        get {
+            let interval = appGroupDefaults.double(forKey: peekMonitorScheduledFireDateKey)
+            return interval > 0 ? Date(timeIntervalSince1970: interval) : nil
+        }
+        set {
+            if let date = newValue {
+                appGroupDefaults.set(
+                    date.timeIntervalSince1970, forKey: peekMonitorScheduledFireDateKey)
+            } else {
+                appGroupDefaults.removeObject(forKey: peekMonitorScheduledFireDateKey)
+            }
+        }
+    }
+
+    /// The end of the one-shot DeviceActivity interval for the current or most recent peek.
+    nonisolated static var peekMonitorScheduledIntervalEndDate: Date? {
+        get {
+            let interval = appGroupDefaults.double(forKey: peekMonitorScheduledIntervalEndDateKey)
+            return interval > 0 ? Date(timeIntervalSince1970: interval) : nil
+        }
+        set {
+            if let date = newValue {
+                appGroupDefaults.set(
+                    date.timeIntervalSince1970,
+                    forKey: peekMonitorScheduledIntervalEndDateKey
+                )
+            } else {
+                appGroupDefaults.removeObject(forKey: peekMonitorScheduledIntervalEndDateKey)
+            }
+        }
+    }
+
+    /// When the last peek-expiry enforcement event happened.
+    nonisolated static var lastPeekRestoreDate: Date? {
+        get {
+            let interval = appGroupDefaults.double(forKey: peekRestoreEventDateKey)
+            return interval > 0 ? Date(timeIntervalSince1970: interval) : nil
+        }
+        set {
+            if let date = newValue {
+                appGroupDefaults.set(date.timeIntervalSince1970, forKey: peekRestoreEventDateKey)
+            } else {
+                appGroupDefaults.removeObject(forKey: peekRestoreEventDateKey)
+            }
+        }
+    }
+
+    /// The source of the last peek-expiry enforcement event.
+    nonisolated static var lastPeekRestoreSource: PeekRestoreSource? {
+        get {
+            guard let raw = appGroupDefaults.string(forKey: peekRestoreSourceKey) else {
+                return nil
+            }
+            return PeekRestoreSource(rawValue: raw)
+        }
+        set {
+            if let value = newValue {
+                appGroupDefaults.set(value.rawValue, forKey: peekRestoreSourceKey)
+            } else {
+                appGroupDefaults.removeObject(forKey: peekRestoreSourceKey)
+            }
+        }
+    }
+
+    /// The outcome of the last peek-expiry enforcement event.
+    nonisolated static var lastPeekRestoreOutcome: PeekRestoreOutcome? {
+        get {
+            guard let raw = appGroupDefaults.string(forKey: peekRestoreOutcomeKey) else {
+                return nil
+            }
+            return PeekRestoreOutcome(rawValue: raw)
+        }
+        set {
+            if let value = newValue {
+                appGroupDefaults.set(value.rawValue, forKey: peekRestoreOutcomeKey)
+            } else {
+                appGroupDefaults.removeObject(forKey: peekRestoreOutcomeKey)
+            }
+        }
+    }
+
+    /// The coarse failure reason for the last peek-expiry enforcement event.
+    nonisolated static var lastPeekRestoreFailure: PeekRestoreFailureReason? {
+        get {
+            guard let raw = appGroupDefaults.string(forKey: peekRestoreFailureKey) else {
+                return nil
+            }
+            return PeekRestoreFailureReason(rawValue: raw)
+        }
+        set {
+            if let value = newValue {
+                appGroupDefaults.set(value.rawValue, forKey: peekRestoreFailureKey)
+            } else {
+                appGroupDefaults.removeObject(forKey: peekRestoreFailureKey)
             }
         }
     }
@@ -333,9 +501,11 @@ enum SharedStorage {
     nonisolated static func activatePeek() {
         let now = Date()
         let duration = nextPeekDurationSeconds
+        resetPeekRestoreDiagnostics()
         peekActivatedDate = now
         peekUsageCountToday += 1
         peekExpirationDate = now.addingTimeInterval(duration)
+        peekExpectedExpirationDate = peekExpirationDate
     }
 
     /// Expires an active peek without resetting the usage count.
@@ -345,6 +515,41 @@ enum SharedStorage {
     /// so subsequent peeks use the correct tiered duration.
     nonisolated static func expirePeek() {
         peekExpirationDate = nil
+    }
+
+    /// Resets shared diagnostics for a brand-new peek activation.
+    nonisolated static func resetPeekRestoreDiagnostics() {
+        peekExpectedExpirationDate = nil
+        peekMonitorScheduledFireDate = nil
+        peekMonitorScheduledIntervalEndDate = nil
+        lastPeekRestoreDate = nil
+        lastPeekRestoreSource = nil
+        lastPeekRestoreOutcome = nil
+        lastPeekRestoreFailure = nil
+    }
+
+    /// Records the one-shot DeviceActivity monitor schedule used as the peek backup.
+    nonisolated static func recordPeekMonitorScheduled(
+        expectedExpiration: Date,
+        scheduledFireDate: Date,
+        scheduledIntervalEndDate: Date
+    ) {
+        peekExpectedExpirationDate = expectedExpiration
+        peekMonitorScheduledFireDate = scheduledFireDate
+        peekMonitorScheduledIntervalEndDate = scheduledIntervalEndDate
+        recordPeekRestoreEvent(source: .scheduler, outcome: .scheduled)
+    }
+
+    /// Records the latest coarse peek-expiry enforcement event.
+    nonisolated static func recordPeekRestoreEvent(
+        source: PeekRestoreSource,
+        outcome: PeekRestoreOutcome,
+        failure: PeekRestoreFailureReason? = nil
+    ) {
+        lastPeekRestoreDate = Date()
+        lastPeekRestoreSource = source
+        lastPeekRestoreOutcome = outcome
+        lastPeekRestoreFailure = failure
     }
 
     /// Resets all peek state for a new calendar day.

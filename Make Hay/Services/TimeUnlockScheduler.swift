@@ -60,11 +60,14 @@ struct DeviceActivityTimeUnlockScheduler: TimeUnlockScheduling {
         // silently ignored. The foreground countdown timer is the primary enforcement
         // mechanism; this monitor is a secondary safety net for when the app is
         // backgrounded or killed during a peek.
-        let start = Calendar.current.dateComponents([.hour, .minute], from: endDate)
+        let scheduledFireDate = roundedUpToNextMinute(endDate)
+        let start = oneShotDateComponents(for: scheduledFireDate)
 
-        // End 1 minute after start — the interval only needs to fire `intervalDidStart`.
-        let intervalEndDate = endDate.addingTimeInterval(60)
-        let end = Calendar.current.dateComponents([.hour, .minute], from: intervalEndDate)
+        // DeviceActivitySchedule enforces a minimum 15-minute interval. The actual
+        // peek re-lock fires at `intervalDidStart`, so a wider window is harmless —
+        // it just keeps the monitor slot open longer.
+        let intervalEndDate = scheduledFireDate.addingTimeInterval(16 * 60)
+        let end = oneShotDateComponents(for: intervalEndDate)
 
         let schedule = DeviceActivitySchedule(
             intervalStart: start,
@@ -72,10 +75,46 @@ struct DeviceActivityTimeUnlockScheduler: TimeUnlockScheduling {
             repeats: false
         )
 
-        try center.startMonitoring(.makeHayPeekEnd, during: schedule)
+        do {
+            try center.startMonitoring(.makeHayPeekEnd, during: schedule)
+            SharedStorage.recordPeekMonitorScheduled(
+                expectedExpiration: endDate,
+                scheduledFireDate: scheduledFireDate,
+                scheduledIntervalEndDate: intervalEndDate
+            )
+        } catch {
+            SharedStorage.recordPeekRestoreEvent(
+                source: .scheduler,
+                outcome: .failed,
+                failure: .scheduleRejected
+            )
+            throw error
+        }
     }
 
     func cancelPeekEnd() {
         DeviceActivityCenter().stopMonitoring([.makeHayPeekEnd])
+    }
+
+    /// Rounds a `Date` up to the next whole minute so the backup monitor never
+    /// fires before the intended peek expiry.
+    private func roundedUpToNextMinute(_ date: Date) -> Date {
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+        let truncated = calendar.date(from: components) ?? date
+
+        if truncated == date {
+            return truncated
+        }
+
+        return calendar.date(byAdding: .minute, value: 1, to: truncated) ?? truncated
+    }
+
+    /// Produces a concrete, non-repeating schedule component set for DeviceActivity.
+    private func oneShotDateComponents(for date: Date) -> DateComponents {
+        Calendar.current.dateComponents(
+            [.calendar, .timeZone, .year, .month, .day, .hour, .minute],
+            from: date
+        )
     }
 }

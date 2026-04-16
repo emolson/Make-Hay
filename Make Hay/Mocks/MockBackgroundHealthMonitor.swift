@@ -40,6 +40,10 @@ actor MockBackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
     /// When `true`, `syncNow()` will throw an error.
     var shouldThrowOnSync: Bool = false
 
+    /// When `true`, `syncNow()` fails if the calling task is already cancelled.
+    /// This lets tests catch accidental self-cancellation bugs in expiry flows.
+    var shouldRespectTaskCancellationDuringSync: Bool = false
+
     /// The result returned by `syncNow()`. Override this to simulate different health states.
     var stubbedResult: EvaluationResult = EvaluationResult(
         steps: 0,
@@ -63,6 +67,10 @@ actor MockBackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
         shouldThrowOnSync = shouldThrow
     }
 
+    func setShouldRespectTaskCancellationDuringSync(_ shouldRespect: Bool) {
+        shouldRespectTaskCancellationDuringSync = shouldRespect
+    }
+
     func setStubbedResult(_ result: EvaluationResult) {
         stubbedResult = result
     }
@@ -71,6 +79,9 @@ actor MockBackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
     func syncNow(reason: String) async throws -> EvaluationResult {
         syncNowCalled = true
         syncNowCallCount += 1
+        if shouldRespectTaskCancellationDuringSync {
+            try Task.checkCancellation()
+        }
         if shouldThrowOnSync {
             throw NSError(
                 domain: "MockBackgroundHealthMonitor",
