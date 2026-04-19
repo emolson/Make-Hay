@@ -40,3 +40,7 @@ let peekRestoreOutcomeKey = "peekRestoreOutcome"
 
 /// UserDefaults key for the coarse failure code of the last peek-expiry enforcement event.
 let peekRestoreFailureKey = "peekRestoreFailure"
+
+/// UserDefaults key for the shield epoch counter. Must match
+/// `SharedStorage.peekShieldEpochKey` in the app target.
+let peekShieldEpochKey = "peekShieldEpoch"

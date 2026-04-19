@@ -213,12 +213,15 @@ final class MakeHayDeviceActivityMonitor: DeviceActivityMonitor {
         Self.logger.info("Peek-end interval started — re-applying shields.")
 
         // Expire the peek in SharedStorage so both the app and future evaluations
-        // know the peek is over.
+        // know the peek is over. Advance the epoch so any app-process evaluation
+        // that read isPeekActive=true before this point knows to discard its
+        // shield write and not accidentally re-open shields.
         guard let defaults = UserDefaults(suiteName: "group.ethanolson.Make-Hay") else {
             Self.logger.error("App Group UserDefaults unavailable — cannot expire peek.")
             return
         }
         defaults.removeObject(forKey: peekExpirationDateKey)
+        defaults.set(defaults.integer(forKey: peekShieldEpochKey) + 1, forKey: peekShieldEpochKey)
 
         switch Self.loadPersistedSelection() {
         case .loaded(let selection):

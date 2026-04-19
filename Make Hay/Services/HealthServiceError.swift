@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import HealthKit
 
 /// Represents the authorization status for HealthKit access.
 ///
@@ -18,10 +19,10 @@ enum HealthAuthorizationStatus: Sendable, Equatable {
 
     /// The HealthKit sheet has been shown, but readable data is not yet proven.
     case unconfirmed
-    
+
     /// The user authorized access to health data.
     case authorized
-    
+
     /// The user denied access or authorization is not possible.
     case denied
 
@@ -50,12 +51,14 @@ enum HealthAuthorizationStatus: Sendable, Equatable {
         return self
     }
 
-    nonisolated static func == (lhs: HealthAuthorizationStatus, rhs: HealthAuthorizationStatus) -> Bool {
+    nonisolated static func == (lhs: HealthAuthorizationStatus, rhs: HealthAuthorizationStatus)
+        -> Bool
+    {
         switch (lhs, rhs) {
         case (.notDetermined, .notDetermined),
-             (.unconfirmed, .unconfirmed),
-             (.authorized, .authorized),
-             (.denied, .denied):
+            (.unconfirmed, .unconfirmed),
+            (.authorized, .authorized),
+            (.denied, .denied):
             true
         default:
             false
@@ -67,10 +70,10 @@ enum HealthAuthorizationStatus: Sendable, Equatable {
 enum HealthServiceError: Error, Sendable {
     /// HealthKit is not available on this device (e.g., iPad without Health app).
     case healthKitNotAvailable
-    
+
     /// The user denied authorization to read health data.
     case authorizationDenied
-    
+
     /// A query to HealthKit failed.
     /// - Parameter description: The localized description of the underlying HealthKit error.
     ///
@@ -78,7 +81,7 @@ enum HealthServiceError: Error, Sendable {
     /// Storing the localized description keeps this enum fully `Sendable` under
     /// Swift 6 strict concurrency without `@unchecked Sendable` workarounds.
     case queryFailed(description: String)
-    
+
     /// A HealthKit query did not respond within the allowed timeout.
     ///
     /// **Why this case?** `withCheckedThrowingContinuation` wrapping HKQuery callbacks
@@ -99,5 +102,23 @@ extension HealthServiceError: LocalizedError {
         case .queryTimedOut:
             return String(localized: "Health data query timed out. Please try again.")
         }
+    }
+}
+
+extension HealthServiceError {
+    /// Returns whether HealthKit reported an empty result set for the query.
+    ///
+    /// HealthKit sometimes surfaces zero matching samples as `errorNoData`
+    /// instead of returning an empty statistic/workout collection. The dashboard
+    /// should treat that as a valid zero-value result rather than a fatal sync error.
+    static func isNoDataError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        guard nsError.domain == HKErrorDomain,
+            let code = HKError.Code(rawValue: nsError.code)
+        else {
+            return false
+        }
+
+        return code == .errorNoData
     }
 }

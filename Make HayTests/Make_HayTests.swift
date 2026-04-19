@@ -13,12 +13,44 @@ import Testing
 @Suite(.serialized)
 struct Make_HayTests {
 
+    @Test @MainActor func loadGoalsKeepsDashboardUsableWhenSyncReturnsEmptyMetrics() async {
+        let monitor = MockBackgroundHealthMonitor()
+        await monitor.setStubbedResult(
+            EvaluationResult(
+                steps: 0,
+                activeEnergy: 0,
+                exerciseMinutesByGoalId: [:],
+                shouldBlock: true,
+                timestamp: Date()
+            )
+        )
+        let viewModel = DashboardViewModel(
+            healthService: MockHealthService(),
+            blockerService: MockBlockerService(),
+            backgroundHealthMonitor: monitor,
+            timeUnlockScheduler: MockTimeUnlockScheduler()
+        )
+        viewModel.errorMessage = "Previous sync error"
+
+        await viewModel.loadGoals(reason: "dashboard.emptyMetrics")
+
+        #expect(viewModel.errorMessage == nil)
+        #expect(viewModel.hasError == false)
+        #expect(viewModel.currentSteps == 0)
+        #expect(viewModel.currentActiveEnergy == 0)
+        #expect(viewModel.isBlocking)
+        #expect(viewModel.isLoading == false)
+        #expect(await monitor.syncNowCallCount == 1)
+    }
+
     @Test @MainActor func activatePeekFailsClosedWhenBackupMonitorSchedulingFails() async throws {
         SharedStorage.clearPeek()
         SharedStorage.resetPeekRestoreDiagnostics()
+        SharedStorage.peekShieldEpoch = 0
         defer {
             SharedStorage.clearPeek()
             SharedStorage.resetPeekRestoreDiagnostics()
+            SharedStorage.peekShieldEpoch = 0
         }
 
         let blockerService = MockBlockerService()
@@ -44,9 +76,11 @@ struct Make_HayTests {
     @Test @MainActor func activatePeekClearsStaleWarningOnSuccess() async throws {
         SharedStorage.clearPeek()
         SharedStorage.resetPeekRestoreDiagnostics()
+        SharedStorage.peekShieldEpoch = 0
         defer {
             SharedStorage.clearPeek()
             SharedStorage.resetPeekRestoreDiagnostics()
+            SharedStorage.peekShieldEpoch = 0
         }
 
         let blockerService = MockBlockerService()
@@ -69,14 +103,91 @@ struct Make_HayTests {
         #expect(await blockerService.getIsBlocking() == false)
     }
 
+    /// Verifies that `activatePeek()` commits peek state to SharedStorage BEFORE it
+    /// clears shields, so that any concurrent background health evaluation that fires
+    /// during activation sees `isPeekActive=true` and knows not to re-block.
+    ///
+    /// This guards against Race 1: background eval reads isPeekActive=false (old order),
+    /// computes shouldBlock=true, and re-blocks over the just-cleared shields.
+    @Test @MainActor func activatePeekWritesStorageBeforeClearingShields() async throws {
+        SharedStorage.clearPeek()
+        SharedStorage.resetPeekRestoreDiagnostics()
+        SharedStorage.peekShieldEpoch = 0
+        defer {
+            SharedStorage.clearPeek()
+            SharedStorage.resetPeekRestoreDiagnostics()
+            SharedStorage.peekShieldEpoch = 0
+        }
+
+        let blockerService = MockBlockerService()
+        let viewModel = DashboardViewModel(
+            healthService: MockHealthService(),
+            blockerService: blockerService,
+            backgroundHealthMonitor: MockBackgroundHealthMonitor(),
+            timeUnlockScheduler: MockTimeUnlockScheduler()
+        )
+
+        let result = await viewModel.activatePeek()
+
+        #expect(result == .activated)
+        // When updateShields(false) was called, SharedStorage.isPeekActive must
+        // have already been true (expiration written before shield-clear).
+        #expect(await blockerService.getIsPeekActiveAtLastShieldClear() == true)
+    }
+
+    @Test @MainActor func activatePeekSupportsDeveloperBypassDurationWithoutUsingQuota()
+        async throws
+    {
+        SharedStorage.clearPeek()
+        SharedStorage.resetPeekRestoreDiagnostics()
+        SharedStorage.peekShieldEpoch = 0
+        defer {
+            SharedStorage.clearPeek()
+            SharedStorage.resetPeekRestoreDiagnostics()
+            SharedStorage.peekShieldEpoch = 0
+        }
+
+        let blockerService = MockBlockerService()
+        let scheduler = MockTimeUnlockScheduler()
+        let viewModel = DashboardViewModel(
+            healthService: MockHealthService(),
+            blockerService: blockerService,
+            backgroundHealthMonitor: MockBackgroundHealthMonitor(),
+            timeUnlockScheduler: scheduler
+        )
+
+        let result = await viewModel.activatePeek(
+            duration: 30,
+            consumesUsageCount: false
+        )
+
+        #expect(result == .activated)
+        #expect(viewModel.isPeekActive)
+        #expect(SharedStorage.peekUsageCountToday == 0)
+        #expect(SharedStorage.peekActivatedDate == nil)
+        #expect(await blockerService.getIsBlocking() == false)
+
+        if let expiration = SharedStorage.peekExpirationDate {
+            let remaining = expiration.timeIntervalSinceNow
+            #expect(remaining > 0)
+            #expect(remaining <= 30)
+        } else {
+            Issue.record("Expected developer bypass to persist an expiration date.")
+        }
+
+        #expect(scheduler.scheduledPeekEndDate == SharedStorage.peekExpirationDate)
+    }
+
     @Test @MainActor func refreshBlockingStateUpdatesBlockingWithoutDashboardLoadingUI()
         async throws
     {
         SharedStorage.clearPeek()
         SharedStorage.resetPeekRestoreDiagnostics()
+        SharedStorage.peekShieldEpoch = 0
         defer {
             SharedStorage.clearPeek()
             SharedStorage.resetPeekRestoreDiagnostics()
+            SharedStorage.peekShieldEpoch = 0
         }
 
         let monitor = MockBackgroundHealthMonitor()
@@ -108,9 +219,11 @@ struct Make_HayTests {
     @Test @MainActor func expirePeekFailsClosedWhenSyncThrows() async throws {
         SharedStorage.clearPeek()
         SharedStorage.resetPeekRestoreDiagnostics()
+        SharedStorage.peekShieldEpoch = 0
         defer {
             SharedStorage.clearPeek()
             SharedStorage.resetPeekRestoreDiagnostics()
+            SharedStorage.peekShieldEpoch = 0
         }
 
         let blockerService = MockBlockerService()
@@ -139,9 +252,11 @@ struct Make_HayTests {
     @Test @MainActor func peekTimerExpiryDoesNotCancelItsOwnSync() async throws {
         SharedStorage.clearPeek()
         SharedStorage.resetPeekRestoreDiagnostics()
+        SharedStorage.peekShieldEpoch = 0
         defer {
             SharedStorage.clearPeek()
             SharedStorage.resetPeekRestoreDiagnostics()
+            SharedStorage.peekShieldEpoch = 0
         }
 
         let blockerService = MockBlockerService()

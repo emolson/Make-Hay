@@ -446,6 +446,12 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
         throwOnFailure: Bool,
         source: SharedStorage.EvaluationSource
     ) async throws -> EvaluationResult {
+        // --- Peek shield epoch guard ---
+        // Snapshot the epoch before any async work. If the epoch changes while
+        // health data is being fetched (peek activated, expired, or rolled back),
+        // we skip the shield write to avoid overwriting the transition's result.
+        let epochAtStart = SharedStorage.peekShieldEpoch
+
         // --- Midnight rollover guard ---
         // Detect and handle day changes so stale yesterday data is never applied to today.
         let evaluationDayStart = Calendar.current.startOfDay(for: Date())
@@ -580,6 +586,15 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
                     Self.logger.warning(
                         "Evaluation returned inconclusive health data — clearing shields for safety."
                     )
+                    // Epoch guard: skip shield write if the peek state changed
+                    // while we were fetching health data.
+                    guard SharedStorage.peekShieldEpoch == epochAtStart else {
+                        Self.logger.debug(
+                            "Skipping shield clear (auth safety): peek epoch changed during evaluation."
+                        )
+                        SharedStorage.lastEvaluationSnapshot = result
+                        return result
+                    }
                     try await blockerService.updateShields(shouldBlock: false)
                     let safeResult = EvaluationResult(
                         steps: 0,
@@ -592,6 +607,20 @@ actor BackgroundHealthMonitor: BackgroundHealthMonitorProtocol {
                     SharedStorage.recordEvaluationFailure(.authorizationUnavailable)
                     return safeResult
                 }
+            }
+
+            // Epoch guard: if the peek state changed while health data was being
+            // fetched (peek activated, expired, or rolled back), skip this
+            // shield write entirely. The transition itself already called
+            // updateShields with the authoritative value.
+            guard SharedStorage.peekShieldEpoch == epochAtStart else {
+                Self.logger.debug(
+                    "Skipping shield update: peek epoch changed during evaluation."
+                )
+                SharedStorage.lastEvaluationSnapshot = result
+                SharedStorage.lastEvaluationDayStart = evaluationDayStart
+                SharedStorage.recordEvaluationSuccess(source: source)
+                return result
             }
 
             try await blockerService.updateShields(

@@ -308,6 +308,10 @@ enum SharedStorage {
     /// Key for the coarse failure reason of the last peek-expiry enforcement event.
     nonisolated static let peekRestoreFailureKey = "peekRestoreFailure"
 
+    /// Key for the shield epoch counter used to detect and discard stale in-flight
+    /// evaluations that span a peek state transition.
+    nonisolated static let peekShieldEpochKey = "peekShieldEpoch"
+
     /// Key for the `Date` when the user last activated a peek.
     /// Used alongside the usage count to detect day rollovers.
     private nonisolated static let peekActivatedDateKey = "peekActivatedDate"
@@ -497,14 +501,21 @@ enum SharedStorage {
         return Date() < expiration
     }
 
-    /// Activates a Mindful Peek with a tiered duration based on today's usage count.
-    nonisolated static func activatePeek() {
+    /// Activates a peek using either the standard tiered duration or an explicit override.
+    nonisolated static func activatePeek(
+        duration: TimeInterval? = nil,
+        consumesUsageCount: Bool = true
+    ) {
         let now = Date()
-        let duration = nextPeekDurationSeconds
+        let resolvedDuration = max(duration ?? nextPeekDurationSeconds, 1)
         resetPeekRestoreDiagnostics()
-        peekActivatedDate = now
-        peekUsageCountToday += 1
-        peekExpirationDate = now.addingTimeInterval(duration)
+
+        if consumesUsageCount {
+            peekActivatedDate = now
+            peekUsageCountToday += 1
+        }
+
+        peekExpirationDate = now.addingTimeInterval(resolvedDuration)
         peekExpectedExpirationDate = peekExpirationDate
     }
 
@@ -515,6 +526,24 @@ enum SharedStorage {
     /// so subsequent peeks use the correct tiered duration.
     nonisolated static func expirePeek() {
         peekExpirationDate = nil
+    }
+
+    /// A monotonically increasing counter incremented on every peek state transition
+    /// (activate, expire, rollback, extension-triggered restore).
+    ///
+    /// **Why an epoch?** Background health evaluations can overlap peek transitions.
+    /// By snapshotting the epoch before a HealthKit fetch and re-reading it before
+    /// calling `updateShields`, evaluations that straddle a transition can detect the
+    /// change and skip their shield write rather than overwriting the transition's result.
+    nonisolated static var peekShieldEpoch: Int {
+        get { appGroupDefaults.integer(forKey: peekShieldEpochKey) }
+        set { appGroupDefaults.set(newValue, forKey: peekShieldEpochKey) }
+    }
+
+    /// Increments the shield epoch, invalidating any in-flight health evaluation that
+    /// read the previous epoch value before this peek state transition.
+    nonisolated static func advancePeekShieldEpoch() {
+        peekShieldEpoch += 1
     }
 
     /// Resets shared diagnostics for a brand-new peek activation.
@@ -558,5 +587,8 @@ enum SharedStorage {
         peekExpirationDate = nil
         peekActivatedDate = nil
         peekUsageCountToday = 0
+        // Epoch is intentionally NOT reset here — the rolling counter must
+        // survive day boundaries so in-flight evals from the previous day
+        // are still correctly invalidated after midnight rollover.
     }
 }

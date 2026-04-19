@@ -782,7 +782,7 @@ final class DashboardViewModel: GoalStatusProvider {
         case failed(message: String)
     }
 
-    /// Activates a Mindful Peek with a tiered duration (3 min → 2 min → 1 min)
+    /// Activates a peek, defaulting to the standard tiered Mindful Peek duration,
     /// and starts a foreground countdown timer.
     ///
     /// **Transactional:** Shields are lifted first. If that fails, SharedStorage is
@@ -790,25 +790,39 @@ final class DashboardViewModel: GoalStatusProvider {
     /// monitor can't be scheduled, we roll back the unblock so the user isn't left
     /// with no hard cutoff.
     @discardableResult
-    func activatePeek() async -> PeekActivationResult {
+    func activatePeek(
+        duration: TimeInterval? = nil,
+        consumesUsageCount: Bool = true
+    ) async -> PeekActivationResult {
         shieldWarning = nil
         SharedStorage.resetPeekRestoreDiagnostics()
 
-        // Step 1 — Lift shields. If this fails the daily peek is NOT consumed.
+        // Step 1 — Advance the epoch and commit peek state BEFORE touching shields.
+        // Any concurrent background evaluation that snapshots the epoch or reads
+        // isPeekActive BEFORE this point will see the old epoch and skip its
+        // shield write, preventing it from re-blocking while we open shields.
+        SharedStorage.advancePeekShieldEpoch()
+        SharedStorage.activatePeek(
+            duration: duration,
+            consumesUsageCount: consumesUsageCount
+        )
+        guard let expiration = SharedStorage.peekExpirationDate else {
+            // SharedStorage couldn't persist — roll back immediately without
+            // having changed any shields.
+            SharedStorage.advancePeekShieldEpoch()
+            let message = String(
+                localized: "Couldn't start pass — please try again.")
+            return .failed(message: message)
+        }
+
+        // Step 2 — Lift shields. isPeekActive is already true, so any concurrent
+        // evaluation that fires NOW will see the peek and skip blocking.
         do {
             try await blockerService.updateShields(shouldBlock: false)
         } catch {
             Self.logger.error("Failed to lift shields for Mindful Peek.")
-            return .failed(message: error.localizedDescription)
-        }
-
-        // Step 2 — Commit peek state to SharedStorage (now the peek is used).
-        SharedStorage.activatePeek()
-        guard let expiration = SharedStorage.peekExpirationDate else {
-            let message = String(
-                localized: "Couldn't start pass — please try again.")
             await rollbackFailedPeekActivation()
-            return .failed(message: message)
+            return .failed(message: error.localizedDescription)
         }
 
         // Step 3 — Schedule the DeviceActivity backup monitor. If this fails,
@@ -910,6 +924,9 @@ final class DashboardViewModel: GoalStatusProvider {
         isPeekActive = false
         peekTimeRemaining = 0
         timeUnlockScheduler.cancelPeekEnd()
+        // Advance epoch so any evaluation that snapshotted the old epoch
+        // (when isPeekActive was true) discards its stale shield write.
+        SharedStorage.advancePeekShieldEpoch()
 
         do {
             try await blockerService.updateShields(shouldBlock: true)
@@ -927,6 +944,10 @@ final class DashboardViewModel: GoalStatusProvider {
         }
         peekTimerTask = nil
 
+        // Advance epoch BEFORE nilling the expiration date so any concurrent
+        // background evaluation that snapshots the epoch (and still sees
+        // isPeekActive=true) will detect the change and skip its shield write.
+        SharedStorage.advancePeekShieldEpoch()
         SharedStorage.expirePeek()
         isPeekActive = false
         peekTimeRemaining = 0

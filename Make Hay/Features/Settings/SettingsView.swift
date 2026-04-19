@@ -13,6 +13,10 @@ struct SettingsView: View {
 
     private static let traceCategory = "SettingsView"
 
+    #if DEBUG
+        private static let developerBypassDuration: TimeInterval = 30
+    #endif
+
     // MARK: - Dependencies
 
     /// Shared permission manager providing HealthKit and Screen Time authorization state.
@@ -222,6 +226,9 @@ struct SettingsView: View {
 
             if shouldShowDailyPassControls {
                 dailyPassRow
+                #if DEBUG
+                    developerBypassRow
+                #endif
             }
         } header: {
             Text(String(localized: "Blocked Apps"))
@@ -462,6 +469,51 @@ struct SettingsView: View {
         }
     }
 
+    #if DEBUG
+        private var developerBypassActionText: String {
+            dashboardViewModel.isPeekActive
+                ? String(localized: "Active")
+                : String(localized: "Use")
+        }
+
+        private var developerBypassRow: some View {
+            Button {
+                Task { await activateDeveloperBypass() }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "wrench.and.screwdriver")
+                        .foregroundStyle(Color.statusWarning)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(String(localized: "Developer Bypass"))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+
+                        Text(
+                            String(
+                                localized:
+                                    "Debug only: skip guardrails and unblock apps for 30 seconds."
+                            )
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                    }
+
+                    Spacer()
+
+                    Text(developerBypassActionText)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(minHeight: 44)
+            }
+            .buttonStyle(.plain)
+            .disabled(dashboardViewModel.isPeekActive)
+            .accessibilityIdentifier("developerBypassButton")
+            .accessibilityLabel(String(localized: "Use Developer Bypass"))
+        }
+    #endif
+
     private var formattedPeekTimeRemaining: String {
         let minutes = Int(dashboardViewModel.peekTimeRemaining) / 60
         let seconds = Int(dashboardViewModel.peekTimeRemaining) % 60
@@ -497,6 +549,21 @@ struct SettingsView: View {
             showingErrorAlert = true
         }
     }
+
+    #if DEBUG
+        /// Activates a short debug-only bypass using the same unblock and restore flow.
+        private func activateDeveloperBypass() async {
+            let result = await dashboardViewModel.activatePeek(
+                duration: Self.developerBypassDuration,
+                consumesUsageCount: false
+            )
+
+            if case .failed(let message) = result {
+                errorMessage = message
+                showingErrorAlert = true
+            }
+        }
+    #endif
 
     /// Attempts to show the HealthKit permission prompt. If the prompt has already been
     /// shown without proven authorization, shows manual guidance instead, since HealthKit
